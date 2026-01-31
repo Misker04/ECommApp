@@ -1,0 +1,20 @@
+frontend_buyer:
+  host: "127.0.0.1"
+  port: 5100
+frontend_seller:
+  host: "127.0.0.1"
+  port: 5200
+backend_customer_db:
+  host: "127.0.0.1"
+  port: 5300
+backend_product_db:
+  host: "127.0.0.1"
+  port: 5400
+session:
+  timeout_seconds: 300   # 5 minutes
+features:
+  enable_make_purchase: false
+storage:
+  data_dir: "./data"
+logging:
+  level: "INFO"
