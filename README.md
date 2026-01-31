@@ -1,6 +1,27 @@
-# Online Marketplace (Assignment 1)
+# Assignment 1 - E-Commerce System
 
-This codebase implements the Assignment‑1 required components for an online marketplace using **socket-based TCP/IP** for **all interprocess communication**.
+This project implements the Assignment‑1 required components for an e-commerce system using **socket-based TCP/IP** for all interprocess communication.
+
+## System design and assumptions
+The system is split into six TCP-connected components: Buyer CLI, Seller CLI, Buyer Frontend, Seller Frontend, CustomerDB, and ProductDB.
+Clients keep a separate TCP connection per process, but sessions are identified by a `session_token` returned at login.
+Buyer/Seller Frontends are stateless routers: they validate requests and forward them to the appropriate DB backend over TCP.
+CustomerDB stores accounts, active sessions (with last-activity timestamps), carts, saved carts, and purchase history.
+ProductDB stores items, per-category item-id allocation, quantities, and feedback (thumbs up/down).
+All messages use a length-prefixed JSON protocol (4-byte big-endian length + UTF-8 JSON payload).
+Passwords are stored/transmitted in cleartext for now.
+All state is in-memory in the DB servers (restarts clear state).
+
+## Current state
+What Works: 
+- All Seller APIs and Buyer APIs required (including search, cart ops, feedback, and ratings), plus session timeout after 5 minutes of inactivity.
+- Stateless frontend semantics (frontends do not retain per-user state; reconnects do not reset sessions/carts as long as DB servers stay up).
+- Concurrent evaluation via the benchmark runner for scenarios 1/2/3 with per-call latency and run throughput reporting.
+
+Not implemented: 
+- `MakePurchase`
+- Security (login, finance etc.)
+
 
 ## Components implemented (6)
 Each component can run as a separate process on a different machine (different IP/port):
@@ -10,8 +31,6 @@ Each component can run as a separate process on a different machine (different I
 4. Server-side Seller Interface (stateless frontend) (`src/frontend/seller_frontend_server.py`)
 5. Customer Database backend (`src/backend/customer_db_server.py`)
 6. Product Database backend (`src/backend/product_db_server.py`)
-
-> Financial transactions / MakePurchase are intentionally **not implemented** in Assignment 1 (see Requirements).
 
 ## Search semantics ("best" match)
 `SearchItemsForSale(item_category, keywords<=5)` uses these semantics:
@@ -67,7 +86,7 @@ python -m src.clients.seller_cli --config config/local.yaml
 python -m src.clients.buyer_cli --config config/local.yaml
 ```
 
-## Protocol (length-prefixed JSON)
+## Protocol
 All communication is a custom TCP protocol:
 - 4-byte big-endian unsigned length prefix
 - UTF-8 JSON object payload
@@ -91,5 +110,3 @@ Response:
   "data": { }
 }
 ```
-
-The frontends accept both the assignment’s CamelCase names and snake_case equivalents.
