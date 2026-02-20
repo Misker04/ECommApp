@@ -72,7 +72,7 @@ This generates:
 |-----|------------------------|
 | VM1 | Customer gRPC Backend  |
 | VM2 | Product gRPC Backend   |
-| VM3 | SOAP Financial Service |
+| VM3 or any used VM | SOAP Financial Service |
 | VM4 | Seller REST Frontend   |
 | VM5 | Buyer REST Frontend    |
 
@@ -89,7 +89,7 @@ Services **must** be started in the following order:
 ##  1️⃣ VM1 – Customer gRPC Backend
 
 ```bash
-python -m src.backend.customer_grpc_server --config config/local.yaml
+python3 -m src.backend.customer_grpc_server --config config/local.yaml
 ```
 
 ---
@@ -97,15 +97,15 @@ python -m src.backend.customer_grpc_server --config config/local.yaml
 ##  2️⃣ VM2 – Product gRPC Backend
 
 ```bash
-python -m src.backend.product_grpc_server --config config/local.yaml
+python3 -m src.backend.product_grpc_server --config config/local.yaml
 ```
 
 ---
 
-##  3️⃣ VM3 – SOAP Financial Service
+##  3️⃣ VM3 – SOAP Financial Service (Can be VM1/VM2/VM4/VM5)
 
 ```bash
-python -m src.financial.soap_server --config config/local.yaml
+python3 -m src.financial.soap_server --config config/local.yaml
 ```
 
 > SOAP may run on any VM but must be running before purchases.
@@ -115,7 +115,7 @@ python -m src.financial.soap_server --config config/local.yaml
 ##  4️⃣ VM4 – Seller REST Frontend
 
 ```bash
-python run_seller_server.py
+python3 run_seller_server.py --config config/local.yaml
 ```
 
 ---
@@ -123,7 +123,7 @@ python run_seller_server.py
 ##  5️⃣ VM5 – Buyer REST Frontend
 
 ```bash
-python run_buyer_server.py
+python3 run_buyer_server.py --config config/local.yaml
 ```
 
 ---
@@ -163,7 +163,16 @@ Before deploying on VMs:
 
 1. Open `config/local.yaml`
 2. Replace `127.0.0.1` with actual VM IP addresses
-3. Ensure:
+3. ---
+
+## How to Get the VM IP Address
+
+On **each VM**, run the following command:
+
+```bash
+hostname -I | awk '{print $1}'
+```
+4. Ensure:
    - Required ports are open
    - Firewalls allow communication
    - gRPC ports (50051, 50052) are accessible
