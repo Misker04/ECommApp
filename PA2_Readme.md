@@ -1,4 +1,4 @@
-# 🛒 PA2 – Distributed Marketplace (gRPC + REST + SOAP)
+# PA2 – Distributed Marketplace (gRPC + REST + SOAP)
 
 This project extends **PA1 (TCP-based architecture)** into a multi-protocol distributed system using:
 
@@ -86,7 +86,7 @@ Services **must** be started in the following order:
 
 ---
 
-##  1️⃣ VM1 – Customer gRPC Backend
+##  VM1 – Customer gRPC Backend
 
 ```bash
 python3 -m src.backend.customer_grpc_server --config config/local.yaml
@@ -94,7 +94,7 @@ python3 -m src.backend.customer_grpc_server --config config/local.yaml
 
 ---
 
-##  2️⃣ VM2 – Product gRPC Backend
+##  VM2 – Product gRPC Backend
 
 ```bash
 python3 -m src.backend.product_grpc_server --config config/local.yaml
@@ -102,7 +102,7 @@ python3 -m src.backend.product_grpc_server --config config/local.yaml
 
 ---
 
-##  3️⃣ VM3 – SOAP Financial Service (Can be VM1/VM2/VM4/VM5)
+##  VM3 – SOAP Financial Service (Can be VM1/VM2/VM4/VM5)
 
 ```bash
 python3 -m src.financial.soap_server --config config/local.yaml
@@ -112,7 +112,7 @@ python3 -m src.financial.soap_server --config config/local.yaml
 
 ---
 
-##  4️⃣ VM4 – Seller REST Frontend
+##  VM4 – Seller REST Frontend
 
 ```bash
 python3 run_seller_server.py --config config/local.yaml
@@ -120,7 +120,7 @@ python3 run_seller_server.py --config config/local.yaml
 
 ---
 
-##  5️⃣ VM5 – Buyer REST Frontend
+##  VM5 – Buyer REST Frontend
 
 ```bash
 python3 run_buyer_server.py --config config/local.yaml
@@ -194,16 +194,16 @@ hostname -I | awk '{print $1}'
 #  Complete Execution Summary
 
 ```text
-1️⃣ Clone Repo
-2️⃣ Create Virtual Environment
-3️⃣ Install Dependencies
-4️⃣ Generate Protobuf Files
-5️⃣ Start Customer gRPC
-6️⃣ Start Product gRPC
-7️⃣ Start SOAP Service
-8️⃣ Start Seller REST
-9️⃣ Start Buyer REST
-🔟 Run Performance Runner
+1) Clone Repo
+2️) Create Virtual Environment
+3️) Install Dependencies
+4️) Generate Protobuf Files
+5️) Start Customer gRPC
+6️) Start Product gRPC
+7️) Start SOAP Service
+8️) Start Seller REST
+9️) Start Buyer REST
+10) Run Performance Runner
 ```
 
 ---
@@ -220,6 +220,3 @@ This project demonstrates:
 - Performance benchmarking
 
 ---
-
-## 👩‍💻 Distributed Systems – PA2
-Multi-Protocol Marketplace Architecture
