@@ -112,6 +112,29 @@ class CustomerService(customer_pb2_grpc.CustomerServiceServicer):
         sess = asyncio.run(self.state.get_session(request.session_token))
         if not sess or sess.role != "buyer":
             context.abort(grpc.StatusCode.UNAUTHENTICATED, "invalid session")
+        buyer_id = int(sess.principal_id)
+        asyncio.run(self.state.db.inc_buyer_items_purchased(
+            buyer_id, int(request.total_units)
+        ))
+
+        counts = Counter(list(request.item_ids))
+        lines = []
+        for key, qty in counts.items():
+            item_id = ItemId.from_any(key)
+            lines.append(TransactionLine(
+                item_id=item_id,
+                seller_id=0,     
+                qty=int(qty),
+                price_each=0.0  
+            ))
+
+        txn = Transaction(
+            txn_id=new_id("txn"),
+            buyer_id=buyer_id,
+            items=lines,
+            total=0.0
+        )
+        asyncio.run(self.state.db.add_transaction(txn))
         asyncio.run(self.state.db.inc_buyer_items_purchased(
             int(sess.principal_id), int(request.total_units)
         ))
