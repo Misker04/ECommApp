@@ -1,50 +1,78 @@
-from __future__ import annotations
-
-import asyncio
-import uuid
-from typing import Any, Dict, Optional
-
-from src.common.protocol import read_message, send_message
+import requests
 
 
 class MarketplaceClient:
-    def __init__(self, host: str, port: int, role: str):
-        self.host = host
-        self.port = port
-        self.role = role
-        self.reader: asyncio.StreamReader | None = None
-        self.writer: asyncio.StreamWriter | None = None
-        # Set after login; automatically sent with each request
-        self.session_token: str | None = None
+    """
+    Base REST client for Buyer and Seller CLI (PA2).
+    """
 
-    async def connect(self) -> None:
-        self.reader, self.writer = await asyncio.open_connection(self.host, self.port)
+    def __init__(self, base_url: str | list[str] | tuple[str, ...]):
+        if isinstance(base_url, (list, tuple)):
+            urls = [str(u).rstrip("/") for u in base_url if str(u).strip()]
+        else:
+            urls = [str(base_url).rstrip("/")]
+        if not urls:
+            raise ValueError("at least one frontend URL is required")
+        self.base_urls = urls
+        self.base_url = self.base_urls[0]
+        self._replica_index = 0
+        self.session_id = None
 
-    async def close(self) -> None:
-        if self.writer:
-            self.writer.close()
-            await self.writer.wait_closed()
-        self.reader = None
-        self.writer = None
+    # ---------------------------------
+    # Core REST sender
+    # ---------------------------------
 
-    async def __aenter__(self) -> "MarketplaceClient":
-        await self.connect()
-        return self
+    def _post(self, endpoint: str, payload: dict, require_session: bool = False):
+        """
+        Sends POST request to REST server.
 
-    async def __aexit__(self, exc_type, exc, tb) -> bool:
-        await self.close()
-        return False
+        Args:
+            endpoint: REST endpoint path
+            payload: JSON body
+            require_session: automatically attach session_token
+        """
 
-    async def request(self, action: str, data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        if not self.reader or not self.writer:
-            raise RuntimeError("not connected")
-        req_id = uuid.uuid4().hex
-        payload = dict(data or {})
-        # Attach session token unless caller overrides it explicitly
-        if self.session_token and "session_token" not in payload:
-            payload["session_token"] = self.session_token
+        if require_session:
+            if not self.session_id:
+                raise Exception("You must login first.")
+            payload = dict(payload)
+            payload["session_token"] = self.session_id
 
-        req = {"req_id": req_id, "role": self.role, "action": action, "data": payload}
-        await send_message(self.writer, req)
-        resp = await read_message(self.reader)
-        return resp
+        errors: list[str] = []
+        response = None
+        for offset in range(len(self.base_urls)):
+            idx = (self._replica_index + offset) % len(self.base_urls)
+            base_url = self.base_urls[idx]
+            url = f"{base_url}/{endpoint}"
+            try:
+                response = requests.post(
+                    url,
+                    json=payload,
+                    timeout=10
+                )
+                self._replica_index = idx
+                self.base_url = base_url
+                break
+            except requests.exceptions.RequestException as e:
+                errors.append(f"{base_url}: {e}")
+                continue
+
+        if response is None:
+            raise Exception("All frontend replicas failed: " + " | ".join(errors))
+
+        if response.status_code != 200:
+            raise Exception(
+                f"Request failed ({response.status_code}): {response.text}"
+            )
+
+        return response.json()
+
+    # ---------------------------------
+    # Session Handling
+    # ---------------------------------
+
+    def set_session(self, session_id: str):
+        self.session_id = session_id
+
+    def clear_session(self):
+        self.session_id = None

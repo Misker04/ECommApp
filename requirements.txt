@@ -1,1 +1,10 @@
 pyyaml>=6.0
+fastapi
+uvicorn[standard]
+grpcio
+grpcio-tools
+spyne
+lxml
+zeep
+requests
+gunicorn

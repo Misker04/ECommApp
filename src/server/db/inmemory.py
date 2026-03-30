@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import time
+import uuid
 from dataclasses import dataclass, field
 from typing import Dict, Optional, List
 
@@ -32,7 +34,51 @@ class InMemoryDB:
     # buyer_id -> saved cart mapping "<category>:<number>" -> qty
     saved_carts_by_buyer: Dict[int, Dict[str, int]] = field(default_factory=dict)
 
+    # Sessions: token -> {principal_id, role, created_at}
+    # Moved here from state.py to keep the frontend stateless (PA2 requirement)
+    _sessions: Dict[str, dict] = field(default_factory=dict)
+
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    _sessions_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+    # ------------------------------
+    # Session Management (PA2)
+    # ------------------------------
+
+    async def create_session(self, role: str, principal_id: int, token: str | None = None) -> str:
+        """Create a new session and return the token."""
+        token = str(token or uuid.uuid4().hex)
+        async with self._sessions_lock:
+            self._sessions[token] = {
+                "principal_id": int(principal_id),
+                "role": str(role),
+                "created_at": time.time(),
+            }
+        return token
+
+    async def get_session(self, token: str) -> Optional[dict]:
+        """
+        Retrieve session by token.
+        Returns None if not found or expired (5-minute timeout per PA1 spec).
+        Refreshes the activity timestamp on each successful access.
+        """
+        SESSION_TIMEOUT = 300  # 5 minutes
+
+        async with self._sessions_lock:
+            sess = self._sessions.get(token)
+            if not sess:
+                return None
+            if time.time() - sess["created_at"] > SESSION_TIMEOUT:
+                del self._sessions[token]
+                return None
+            # Refresh activity timestamp (sliding window timeout)
+            sess["created_at"] = time.time()
+            return dict(sess)
+
+    async def delete_session(self, token: str) -> None:
+        """Remove a session on logout."""
+        async with self._sessions_lock:
+            self._sessions.pop(token, None)
 
     # ------------------------------
     # Seller / Buyer management
