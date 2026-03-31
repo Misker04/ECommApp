@@ -8,6 +8,7 @@ from src.backend.customer_db_server import run_customer_db
 from src.backend.product_db_server import run_product_db
 from src.frontend.buyer_frontend_server import run_server as run_buyer_frontend
 from src.frontend.seller_frontend_server import run_server as run_seller_frontend
+from src.backend.customer_grpc_server import customer_pb2_grpc
 
 
 async def run_all(config_path: str) -> None:

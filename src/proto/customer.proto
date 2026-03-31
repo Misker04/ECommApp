@@ -1,0 +1,127 @@
+syntax = "proto3";
+
+package customer;
+
+// -------------------------------------------------
+// Customer Service Definition
+// -------------------------------------------------
+
+service CustomerService {
+
+  // -------- Account APIs --------
+
+  rpc CreateAccount (CreateAccountRequest)
+      returns (CreateAccountResponse);
+
+  rpc Login (LoginRequest)
+      returns (LoginResponse);
+
+  rpc Logout (SessionRequest)
+      returns (Empty);
+
+  // -------- Session Validation --------
+  // Called by Product DB to validate a session token
+  // without needing to share in-memory state.
+  // This is the key to making separate VM processes work.
+
+  rpc ValidateSession (SessionRequest)
+      returns (SessionInfo);
+
+  // -------- Ratings --------
+
+  rpc GetSellerRating (SessionSellerRequest)
+      returns (RatingResponse);
+
+  // -------- Purchases --------
+
+  rpc GetBuyerPurchases (SessionRequest)
+      returns (PurchaseList);
+
+  // -------- Purchase Recording --------
+  // Called by Product DB after finalizing a purchase
+  // so buyer purchase history is recorded in Customer DB
+
+  rpc RecordPurchase (RecordPurchaseRequest)
+      returns (Empty);
+
+  rpc RecordSellerFeedback (RecordSellerFeedbackRequest)
+      returns (Empty);
+}
+
+
+// -------------------------------------------------
+// Account Messages
+// -------------------------------------------------
+
+message CreateAccountRequest {
+  string username = 1;
+  string password = 2;
+}
+
+message CreateAccountResponse {
+  int32 user_id = 1;
+}
+
+message LoginRequest {
+  string username = 1;
+  string password = 2;
+}
+
+message LoginResponse {
+  string session_token = 1;
+  int32 user_id = 2;
+}
+
+message SessionRequest {
+  string session_token = 1;
+}
+
+// -------------------------------------------------
+// Session Validation
+// -------------------------------------------------
+
+message SessionInfo {
+  bool valid = 1;
+  int32 principal_id = 2;   // buyer_id or seller_id
+  string role = 3;           // "buyer" or "seller"
+}
+
+// -------------------------------------------------
+// Ratings
+// -------------------------------------------------
+
+message SessionSellerRequest {
+  string session_token = 1;
+  int32 seller_id = 2;
+}
+
+message RatingResponse {
+  int32 thumbs_up = 1;
+  int32 thumbs_down = 2;
+}
+
+// -------------------------------------------------
+// Purchases
+// -------------------------------------------------
+
+message PurchaseList {
+  repeated string item_ids = 1;
+}
+
+message RecordPurchaseRequest {
+  string session_token = 1;
+  repeated string item_ids = 2;  // "category:number" strings
+  int32 total_units = 3;
+}
+
+message RecordSellerFeedbackRequest {
+  int32 seller_id = 1;
+  int32 thumbs_up = 2;
+  int32 thumbs_down = 3;
+}
+
+// -------------------------------------------------
+// Common
+// -------------------------------------------------
+
+message Empty {}

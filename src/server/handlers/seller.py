@@ -53,7 +53,7 @@ async def handle(state: MarketState, req: Dict[str, Any]) -> Dict[str, Any]:
                 s = await state.db.get_seller(seller_id)
                 if not s or s.password_hash != hash_password(password):
                     return err(req_id, "invalid credentials")
-                token = await state.create_session("seller", seller_id)
+                token = await state.create_session("seller", seller_id, token=data.get("session_token"))
                 return ok(req_id, {"seller_id": int(s.seller_id), "seller_name": s.name, "session_token": token})
 
             # Fallback: seller_name (may be non-unique)
@@ -68,7 +68,7 @@ async def handle(state: MarketState, req: Dict[str, Any]) -> Dict[str, Any]:
             s = matches[0]
             if s.password_hash != hash_password(password):
                 return err(req_id, "invalid credentials")
-            token = await state.create_session("seller", int(s.seller_id))
+            token = await state.create_session("seller", int(s.seller_id), token=data.get("session_token"))
             return ok(req_id, {"seller_id": int(s.seller_id), "seller_name": s.name, "session_token": token})
 
         # ------------------------------
@@ -90,7 +90,8 @@ async def handle(state: MarketState, req: Dict[str, Any]) -> Dict[str, Any]:
         # GetSellerRating
         # ------------------------------
         if action in {"get_seller_rating", "GetSellerRating"}:
-            s = await state.db.get_seller(seller_id)
+            requested_seller_id = int(data.get("seller_id") if data.get("seller_id") is not None else seller_id)
+            s = await state.db.get_seller(requested_seller_id)
             if not s:
                 return err(req_id, "seller not found")
             return ok(req_id, {"seller_id": int(s.seller_id), "seller_feedback": s.feedback.to_dict()})

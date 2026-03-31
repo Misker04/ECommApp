@@ -1,20 +1,83 @@
-frontend_buyer:
-  host: "127.0.0.1"
-  port: 5100
 frontend_seller:
-  host: "127.0.0.1"
-  port: 5200
+  host: "127.0.0.1"   # local testing; for PA3 spread seller frontend replicas across VM1..VM4
+  port: 8080
+  replicas:
+    - host: "127.0.0.1"   # seller frontend replica 0 -> intended VM1
+      port: 8080
+    - host: "127.0.0.1"   # seller frontend replica 1 -> intended VM2
+      port: 8081
+    - host: "127.0.0.1"   # seller frontend replica 2 -> intended VM3
+      port: 8082
+    - host: "127.0.0.1"   # seller frontend replica 3 -> intended VM4
+      port: 8083
+
+frontend_buyer:
+  host: "127.0.0.1"      # local testing; for PA3 spread buyer frontend replicas across VM1..VM4
+  port: 8090
+  replicas:
+    - host: "127.0.0.1"   # buyer frontend replica 0 -> intended VM1
+      port: 8090
+    - host: "127.0.0.1"   # buyer frontend replica 1 -> intended VM2
+      port: 8091
+    - host: "127.0.0.1"   # buyer frontend replica 2 -> intended VM3
+      port: 8092
+    - host: "127.0.0.1"   # buyer frontend replica 3 -> intended VM4
+      port: 8093
+
 backend_customer_db:
-  host: "127.0.0.1"
-  port: 5300
+  host:  "127.0.0.1"        # local testing; for PA3 spread customer DB replicas across VMs
+  port: 50051           
+  seller_port: 50053    
+  replicas:
+    - host: "127.0.0.1"     # customer DB buyer replica 0 -> intended VM1
+      port: 50051
+    - host: "127.0.0.1"     # customer DB buyer replica 1 -> intended VM2
+      port: 50061
+    - host: "127.0.0.1"     # customer DB buyer replica 2 -> intended VM3
+      port: 50071
+    - host: "127.0.0.1"     # customer DB buyer replica 3 -> intended VM4
+      port: 50081
+    - host: "127.0.0.1"     # customer DB buyer replica 4 -> intended VM4
+      port: 50091
+  seller_replicas:
+    - host: "127.0.0.1"     # customer DB seller replica 0 -> intended VM1
+      port: 50053
+    - host: "127.0.0.1"     # customer DB seller replica 1 -> intended VM2
+      port: 50063
+    - host: "127.0.0.1"     # customer DB seller replica 2 -> intended VM3
+      port: 50073
+    - host: "127.0.0.1"     # customer DB seller replica 3 -> intended VM4
+      port: 50083
+    - host: "127.0.0.1"     # customer DB seller replica 4 -> intended VM4
+      port: 50093
+
 backend_product_db:
-  host: "127.0.0.1"
-  port: 5400
+  host: "127.0.0.1"          # local testing; for PA3 spread product DB replicas across VMs
+  port: 50052
+  replicas:
+    - host: "127.0.0.1"      # product DB replica 0 -> intended VM1
+      port: 50052
+    - host: "127.0.0.1"      # product DB replica 1 -> intended VM2
+      port: 50062
+    - host: "127.0.0.1"      # product DB replica 2 -> intended VM3
+      port: 50072
+    - host: "127.0.0.1"      # product DB replica 3 -> intended VM4
+      port: 50082
+    - host: "127.0.0.1"      # product DB replica 4 -> intended VM4
+      port: 50092
+
+soap:
+  host: "127.0.0.1"       # SOAP server -> intended VM4 for PA3, localhost for local testing
+  port: 8000
+
 session:
-  timeout_seconds: 300   # 5 minutes
+  timeout_seconds: 300
+
 features:
-  enable_make_purchase: false
+  enable_make_purchase: true
+
 storage:
   data_dir: "./data"
+
 logging:
   level: "INFO"

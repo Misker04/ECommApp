@@ -10,22 +10,18 @@ from src.server.handlers.utils import ok, err
 
 
 def _norm_action(a: Any) -> str:
-    """Normalize action names while supporting assignment-style CamelCase."""
     return str(a or "").strip()
 
 
 def _parse_keywords(v: Any) -> List[str]:
-    """Accept list of keywords, or comma-separated string."""
     if v is None:
         return []
     if isinstance(v, list):
         kws = [str(x) for x in v if str(x)]
     elif isinstance(v, str):
-        # allow "kw1,kw2"
         kws = [k.strip() for k in v.split(",") if k.strip()]
     else:
         raise ValueError("keywords must be a list or comma-separated string")
-
     if len(kws) > 5:
         raise ValueError("keywords must have at most 5 entries")
     for k in kws:
@@ -35,7 +31,6 @@ def _parse_keywords(v: Any) -> List[str]:
 
 
 async def _require_buyer_session(state: MarketState, req: Dict[str, Any]) -> Tuple[str, int] | None:
-    """Return (token, buyer_id) if a valid buyer session token exists, else None."""
     data = req.get("data") or {}
     token = str(data.get("session_token") or req.get("session_token") or "")
     sess = await state.get_session(token)
@@ -51,17 +46,19 @@ def _score_item_keywords(item_keywords: List[str], query_keywords: List[str]) ->
     return sum(1 for q in query_keywords if q.lower() in item_set)
 
 
-async def _do_purchase(state: MarketState, buyer_id: int) -> Dict[str, Any]:
-    """Implements purchase semantics used by checkout/make_purchase."""
+async def _do_purchase(state: MarketState, buyer_id: int, txn_id: str | None = None) -> Dict[str, Any]:
+    """
+    Implements purchase semantics.
+    Cart is now read/written via state.get_cart / state.set_cart
+    so it persists in the DB (stateless frontend).
+    """
     buyer = await state.db.get_buyer(buyer_id)
     if not buyer:
         raise ValueError("buyer not found")
 
-    # copy and clear cart atomically
-    async with state.carts_lock:
-        cart = dict(state.carts.get(int(buyer_id), {}))
-        state.carts[int(buyer_id)] = {}
-
+    # Load the persisted cart. We only clear it after a successful purchase
+    # so a failed checkout does not destroy the buyer's pending items.
+    cart = await state.get_cart(int(buyer_id))
     if not cart:
         raise ValueError("cart is empty")
 
@@ -69,7 +66,7 @@ async def _do_purchase(state: MarketState, buyer_id: int) -> Dict[str, Any]:
     lines: List[TransactionLine] = []
     total_units = 0
 
-    # Validate all items first (best-effort)
+    # Validate all items first
     for item_key, qty in cart.items():
         item_id = ItemId.from_any(item_key)
         it = await state.db.get_item(item_id)
@@ -98,22 +95,19 @@ async def _do_purchase(state: MarketState, buyer_id: int) -> Dict[str, Any]:
             )
         )
 
-        # decrement inventory
         await state.db.update_item_quantity(item_id, int(it.quantity) - int(qty))
-
-        # increment seller items_sold
         await state.db.inc_seller_items_sold(int(it.seller_id), int(qty))
 
-    # increment buyer items_purchased
     await state.db.inc_buyer_items_purchased(int(buyer_id), int(total_units))
 
     txn = Transaction(
-        txn_id=new_id("txn"),
+        txn_id=str(txn_id or new_id("txn")),
         buyer_id=int(buyer_id),
         items=lines,
         total=total,
     )
     await state.db.add_transaction(txn)
+    await state.clear_cart(int(buyer_id))
     return {"transaction": txn.to_public_dict()}
 
 
@@ -140,22 +134,15 @@ async def handle(state: MarketState, req: Dict[str, Any]) -> Dict[str, Any]:
         if action in {"login", "Login"}:
             password = str(data["password"])
 
-            # Prefer unambiguous buyer_id if provided
             if data.get("buyer_id") is not None:
                 buyer_id = int(data["buyer_id"])
                 b = await state.db.get_buyer(buyer_id)
                 if not b or b.password_hash != hash_password(password):
                     return err(req_id, "invalid credentials")
-                token = await state.create_session("buyer", buyer_id)
-
-                # load saved cart into active cart
-                saved = await state.db.load_saved_cart(buyer_id)
-                async with state.carts_lock:
-                    state.carts[buyer_id] = dict(saved)
-
+                token = await state.create_session("buyer", buyer_id, token=data.get("session_token"))
+                # No in-memory cart load needed — cart lives in DB now
                 return ok(req_id, {"buyer_id": int(b.buyer_id), "buyer_name": b.name, "session_token": token})
 
-            # Fallback: buyer_name (may be non-unique)
             name = str(data.get("buyer_name") or data.get("username") or "")
             if not name:
                 return err(req_id, "buyer_id or buyer_name is required")
@@ -167,12 +154,7 @@ async def handle(state: MarketState, req: Dict[str, Any]) -> Dict[str, Any]:
             b = matches[0]
             if b.password_hash != hash_password(password):
                 return err(req_id, "invalid credentials")
-            token = await state.create_session("buyer", int(b.buyer_id))
-
-            saved = await state.db.load_saved_cart(int(b.buyer_id))
-            async with state.carts_lock:
-                state.carts[int(b.buyer_id)] = dict(saved)
-
+            token = await state.create_session("buyer", int(b.buyer_id), token=data.get("session_token"))
             return ok(req_id, {"buyer_id": int(b.buyer_id), "buyer_name": b.name, "session_token": token})
 
         # ------------------------------
@@ -180,12 +162,7 @@ async def handle(state: MarketState, req: Dict[str, Any]) -> Dict[str, Any]:
         # ------------------------------
         if action in {"logout", "Logout"}:
             token = str(data.get("session_token") or "")
-            sess = await state.get_session(token)
-            if sess and sess.role == "buyer":
-                buyer_id = int(sess.principal_id)
-                # Clear the active cart when logging out (unless it was saved explicitly).
-                async with state.carts_lock:
-                    state.carts[buyer_id] = {}
+            # Cart is already in DB — no need to clear in-memory on logout
             if token:
                 await state.delete_session(token)
             return ok(req_id, {"logged_out": True})
@@ -206,7 +183,6 @@ async def handle(state: MarketState, req: Dict[str, Any]) -> Dict[str, Any]:
             keywords = _parse_keywords(data.get("keywords"))
 
             items = await state.db.list_items()
-            # Filter by category and availability
             candidates = [it for it in items if int(it.category) == category and int(it.quantity) > 0]
 
             scored: List[Tuple[int, float, float, Dict[str, Any]]] = []
@@ -214,7 +190,6 @@ async def handle(state: MarketState, req: Dict[str, Any]) -> Dict[str, Any]:
                 score = _score_item_keywords(it.keywords, keywords)
                 if keywords and score == 0:
                     continue
-                # tiebreakers: more thumbs up, then newer
                 scored.append(
                     (score, float(it.feedback.thumbs_up), float(it.created_at), it.to_public_dict() | {"match_score": score})
                 )
@@ -246,17 +221,16 @@ async def handle(state: MarketState, req: Dict[str, Any]) -> Dict[str, Any]:
             if int(it.quantity) <= 0:
                 return err(req_id, "item is not available")
 
-            async with state.carts_lock:
-                cart = state.carts.setdefault(int(buyer_id), {})
-                k = item_id.key()
-                already = int(cart.get(k, 0))
-                # ensure we don't exceed current inventory when adding
-                if already + qty > int(it.quantity):
-                    return err(req_id, "insufficient inventory")
-                cart[k] = already + qty
-                cart_snapshot = dict(cart)
+            # All cart ops go through DB now (stateless frontend)
+            cart = await state.get_cart(int(buyer_id))
+            k = item_id.key()
+            already = int(cart.get(k, 0))
+            if already + qty > int(it.quantity):
+                return err(req_id, "insufficient inventory")
+            cart[k] = already + qty
+            await state.set_cart(int(buyer_id), cart)
 
-            return ok(req_id, {"buyer_id": int(buyer_id), "cart": cart_snapshot})
+            return ok(req_id, {"buyer_id": int(buyer_id), "cart": cart})
 
         # ------------------------------
         # RemoveItemFromCart
@@ -267,47 +241,43 @@ async def handle(state: MarketState, req: Dict[str, Any]) -> Dict[str, Any]:
             if qty <= 0:
                 return err(req_id, "quantity must be > 0")
 
-            async with state.carts_lock:
-                cart = state.carts.setdefault(int(buyer_id), {})
-                k = item_id.key()
-                if k not in cart:
-                    return err(req_id, "item not in cart")
-                cur = int(cart[k])
-                if qty > cur:
-                    return err(req_id, "cannot remove more than current quantity in cart")
-                new_qty = cur - qty
-                if new_qty == 0:
-                    cart.pop(k, None)
-                else:
-                    cart[k] = new_qty
-                cart_snapshot = dict(cart)
+            cart = await state.get_cart(int(buyer_id))
+            k = item_id.key()
+            if k not in cart:
+                return err(req_id, "item not in cart")
+            cur = int(cart[k])
+            if qty > cur:
+                return err(req_id, "cannot remove more than current quantity in cart")
+            new_qty = cur - qty
+            if new_qty == 0:
+                cart.pop(k, None)
+            else:
+                cart[k] = new_qty
+            await state.set_cart(int(buyer_id), cart)
 
-            return ok(req_id, {"buyer_id": int(buyer_id), "cart": cart_snapshot})
+            return ok(req_id, {"buyer_id": int(buyer_id), "cart": cart})
 
         # ------------------------------
         # SaveCart
         # ------------------------------
         if action in {"save_cart", "SaveCart"}:
-            async with state.carts_lock:
-                cart = dict(state.carts.get(int(buyer_id), {}))
-            await state.db.save_cart(int(buyer_id), cart)
+            # Cart is already persisted in DB on every operation.
+            # This is now a no-op that returns the current cart.
+            cart = await state.get_cart(int(buyer_id))
             return ok(req_id, {"saved": True, "cart": cart})
 
         # ------------------------------
         # ClearCart
         # ------------------------------
         if action in {"clear_cart", "ClearCart"}:
-            async with state.carts_lock:
-                state.carts[int(buyer_id)] = {}
+            await state.clear_cart(int(buyer_id))
             return ok(req_id, {"cleared": True})
 
         # ------------------------------
         # DisplayCart
         # ------------------------------
         if action in {"display_cart", "DisplayCart"}:
-            async with state.carts_lock:
-                cart = dict(state.carts.get(int(buyer_id), {}))
-            # return as a list of item_id + qty
+            cart = await state.get_cart(int(buyer_id))
             items = [{"item_id": ItemId.from_any(k).to_dict(), "qty": int(v)} for k, v in cart.items()]
             return ok(req_id, {"cart": items})
 
@@ -315,16 +285,15 @@ async def handle(state: MarketState, req: Dict[str, Any]) -> Dict[str, Any]:
         # MakePurchase
         # ------------------------------
         if action in {"make_purchase", "MakePurchase", "checkout"}:
-            out = await _do_purchase(state, int(buyer_id))
+            out = await _do_purchase(state, int(buyer_id), txn_id=data.get("txn_id"))
             return ok(req_id, out)
 
         # ------------------------------
-        # ProvideFeedback (thumbs up/down on an item)
+        # ProvideFeedback
         # ------------------------------
         if action in {"provide_feedback", "ProvideFeedback"}:
             item_id = ItemId.from_any(data.get("item_id"))
             fb = data.get("feedback")
-            # Accept: {"thumbs_up":1,"thumbs_down":0} OR "up"/"down"
             up = 0
             down = 0
             if isinstance(fb, str):
@@ -339,9 +308,8 @@ async def handle(state: MarketState, req: Dict[str, Any]) -> Dict[str, Any]:
                 up = int(fb.get("thumbs_up", 0))
                 down = int(fb.get("thumbs_down", 0))
                 if (up, down) not in {(1, 0), (0, 1)}:
-                    return err(req_id, "feedback dict must be either {thumbs_up:1,thumbs_down:0} or {thumbs_up:0,thumbs_down:1}")
+                    return err(req_id, "feedback dict must be {thumbs_up:1} or {thumbs_down:1}")
             else:
-                # also accept direct field
                 s = str(data.get("thumb") or data.get("vote") or "").strip().lower()
                 if s in {"up", "down"}:
                     up = 1 if s == "up" else 0
@@ -352,10 +320,11 @@ async def handle(state: MarketState, req: Dict[str, Any]) -> Dict[str, Any]:
             await state.db.add_item_feedback(item_id, thumbs_up=up, thumbs_down=down)
             it = await state.db.get_item(item_id)
             assert it is not None
+            await state.db.add_seller_feedback(int(it.seller_id), thumbs_up=up, thumbs_down=down)
             return ok(req_id, {"item_id": item_id.to_dict(), "item_feedback": it.feedback.to_dict()})
 
         # ------------------------------
-        # GetSellerRating (given seller_id)
+        # GetSellerRating
         # ------------------------------
         if action in {"get_seller_rating", "GetSellerRating"}:
             seller_id = int(data.get("seller_id"))
@@ -365,7 +334,7 @@ async def handle(state: MarketState, req: Dict[str, Any]) -> Dict[str, Any]:
             return ok(req_id, {"seller_id": int(s.seller_id), "seller_feedback": s.feedback.to_dict()})
 
         # ------------------------------
-        # GetBuyerPurchases (history of item IDs purchased by this buyer)
+        # GetBuyerPurchases
         # ------------------------------
         if action in {"get_buyer_purchases", "GetBuyerPurchases"}:
             txns = await state.db.list_transactions_for_buyer(int(buyer_id))
@@ -376,6 +345,7 @@ async def handle(state: MarketState, req: Dict[str, Any]) -> Dict[str, Any]:
             return ok(req_id, {"buyer_id": int(buyer_id), "purchases": history, "transactions": [t.to_public_dict() for t in txns]})
 
         return err(req_id, f"unknown buyer action: {action}")
+
     except KeyError as e:
         return err(req_id, f"missing field: {e}")
     except ValueError as e:
