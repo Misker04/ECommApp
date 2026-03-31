@@ -55,6 +55,32 @@ python3 -m src.clients.bench.runner --config config/pa3_4vm.yaml --scenario 1 --
 python3 -m src.clients.bench.runner --config config/pa3_4vm.yaml --scenario 2 --runs 10 --ops_per_client 1000 --items_per_seller 5 --warmup 1
 python3 -m src.clients.bench.runner --config config/pa3_4vm.yaml --scenario 3 --runs 10 --ops_per_client 1000 --items_per_seller 5 --warmup 1
 
+- - - -
+mkdir -p eval
+python3 -m src.clients.bench.runner --config config/pa3_4vm.yaml --scenario 1 --runs 10 --ops_per_client 1000 --items_per_seller 5 --warmup 1 --label normal | tee eval/scenario1_normal.txt
+
+- - - -
+pkill -f 'src.pa3.frontend.seller_rest_server_pa3 --config config/pa3_4vm.yaml --frontend-index 1'
+pkill -f 'src.pa3.frontend.buyer_rest_server_pa3 --config config/pa3_4vm.yaml --frontend-index 1'
+
+- - - -
+python3 -m src.clients.bench.runner --config config/pa3_4vm.yaml --scenario 1 --runs 10 --ops_per_client 1000 --items_per_seller 5 --warmup 1 --label frontend_failed | tee eval/scenario1_frontend_failed.txt
+
+- - - -
+python3 scripts/find_product_leader.py --config config/pa3_4vm.yaml
+
+pkill -f 'src.pa3.product_replica_server --config config/pa3_4vm.yaml --replica-id 0'
+python3 -m src.clients.bench.runner --config config/pa3_4vm.yaml --scenario 1 --runs 10 --ops_per_client 1000 --items_per_seller 5 --warmup 1 --label product_follower_failed | tee eval/scenario1_product_follower_failed.txt
+
+- - - -
+python3 scripts/find_product_leader.py --config config/pa3_4vm.yaml
+
+pkill -f 'src.pa3.product_replica_server --config config/pa3_4vm.yaml --replica-id 1'
+sleep 5
+python3 scripts/find_product_leader.py --config config/pa3_4vm.yaml
+python3 -m src.clients.bench.runner --config config/pa3_4vm.yaml --scenario 1 --runs 10 --ops_per_client 1000 --items_per_seller 5 --warmup 1 --label product_leader_failed | tee eval/scenario1_product_leader_failed.txt
+
+
 
 # PA3 ECommApp
 
