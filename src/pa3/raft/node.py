@@ -40,22 +40,44 @@ class RaftNode:
         self.last_heartbeat = time.monotonic()
         self.lock = asyncio.Lock()
         self.pending_commits: Dict[int, asyncio.Future] = {}
+        self.heartbeat_interval_s = 0.10
+        self.election_timeout_min_s = 0.60
+        self.election_timeout_max_s = 1.00
+        self.rpc_timeout_s = 2.0
+        self.election_deadline = time.monotonic()
+        self._broadcast_lock = asyncio.Lock()
+
+    def _next_election_deadline(self) -> float:
+        return time.monotonic() + random.uniform(
+            self.election_timeout_min_s,
+            self.election_timeout_max_s,
+        )
 
     async def start(self, host: str, port: int) -> None:
         self.server = await asyncio.start_server(self._handle_conn, host, port)
+        async with self.lock:
+            self.election_deadline = self._next_election_deadline()
         asyncio.create_task(self._ticker())
         asyncio.create_task(self._apply_loop())
 
     async def _send_rpc(self, peer: Peer, payload: dict) -> dict:
-        reader, writer = await asyncio.open_connection(peer.host, peer.port)
-        writer.write((json.dumps(payload) + '\n').encode('utf-8'))
-        await writer.drain()
-        raw = await reader.readline()
-        writer.close()
-        await writer.wait_closed()
-        if not raw:
-            raise ConnectionError('empty raft response')
-        return json.loads(raw.decode('utf-8'))
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(peer.host, peer.port),
+            timeout=self.rpc_timeout_s,
+        )
+        try:
+            writer.write((json.dumps(payload) + '\n').encode('utf-8'))
+            await asyncio.wait_for(writer.drain(), timeout=self.rpc_timeout_s)
+            raw = await asyncio.wait_for(reader.readline(), timeout=self.rpc_timeout_s)
+            if not raw:
+                raise ConnectionError('empty raft response')
+            return json.loads(raw.decode('utf-8'))
+        finally:
+            writer.close()
+            try:
+                await asyncio.wait_for(writer.wait_closed(), timeout=self.rpc_timeout_s)
+            except Exception:
+                pass
 
     async def _handle_conn(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         raw = await reader.readline()
@@ -78,15 +100,14 @@ class RaftNode:
 
     async def _ticker(self) -> None:
         while True:
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(self.heartbeat_interval_s)
             async with self.lock:
-                elapsed = time.monotonic() - self.last_heartbeat
-                timeout = random.uniform(0.25, 0.45)
                 role = self.role
+                election_deadline = self.election_deadline
             if role == 'leader':
                 await self._broadcast_heartbeats()
                 continue
-            if elapsed >= timeout:
+            if time.monotonic() >= election_deadline:
                 await self._start_election()
 
     async def _start_election(self) -> None:
@@ -96,6 +117,7 @@ class RaftNode:
             term = self.current_term
             self.voted_for = self.node_id
             self.last_heartbeat = time.monotonic()
+            self.election_deadline = self._next_election_deadline()
             last_log_index = self.log[-1].index if self.log else -1
             last_log_term = self.log[-1].term if self.log else -1
         votes = 1
@@ -114,6 +136,8 @@ class RaftNode:
                         self.role = 'follower'
                         self.current_term = resp['term']
                         self.voted_for = None
+                        self.leader_id = None
+                        self.election_deadline = self._next_election_deadline()
                     return
                 if resp.get('vote_granted'):
                     votes += 1
@@ -136,6 +160,8 @@ class RaftNode:
                 self.current_term = term
                 self.role = 'follower'
                 self.voted_for = None
+                self.leader_id = None
+                self.election_deadline = self._next_election_deadline()
             last_log_index = self.log[-1].index if self.log else -1
             last_log_term = self.log[-1].term if self.log else -1
             candidate_up_to_date = (msg['last_log_term'], msg['last_log_index']) >= (last_log_term, last_log_index)
@@ -144,6 +170,7 @@ class RaftNode:
             if granted:
                 self.voted_for = int(msg['candidate_id'])
                 self.last_heartbeat = time.monotonic()
+                self.election_deadline = self._next_election_deadline()
             return {'term': self.current_term, 'vote_granted': granted}
 
     async def _handle_append_entries(self, msg: dict) -> dict:
@@ -155,6 +182,7 @@ class RaftNode:
             self.role = 'follower'
             self.leader_id = int(msg['leader_id'])
             self.last_heartbeat = time.monotonic()
+            self.election_deadline = self._next_election_deadline()
             prev_index = int(msg['prev_log_index'])
             prev_term = int(msg['prev_log_term'])
             if prev_index >= 0:
@@ -175,9 +203,10 @@ class RaftNode:
             return {'term': self.current_term, 'success': True, 'match_index': len(self.log) - 1}
 
     async def _broadcast_heartbeats(self) -> None:
-        tasks = [self._replicate_to_peer(peer) for peer in self.peers]
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+        async with self._broadcast_lock:
+            tasks = [self._replicate_to_peer(peer) for peer in self.peers]
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _replicate_to_peer(self, peer: Peer) -> None:
         async with self.lock:
@@ -204,6 +233,7 @@ class RaftNode:
                 self.role = 'follower'
                 self.voted_for = None
                 self.leader_id = None
+                self.election_deadline = self._next_election_deadline()
                 return
             if resp.get('success'):
                 match_idx = int(resp.get('match_index', prev_index))
@@ -246,7 +276,7 @@ class RaftNode:
             fut = asyncio.get_running_loop().create_future()
             self.pending_commits[entry.index] = fut
         await self._broadcast_heartbeats()
-        await asyncio.wait_for(fut, timeout=3.0)
+        await asyncio.wait_for(fut, timeout=15.0)
 
     def leader_hint(self) -> Optional[int]:
         return self.leader_id

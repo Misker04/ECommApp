@@ -43,6 +43,8 @@ pkill -f 'src.financial.soap_server' || true
 source .venv/bin/activate
 ```
 
+bash ./scripts/restart_pa3_4vm.sh 1 config/pa3_4vm.yaml
+
 On `VM1` only:
 
 ```bash

@@ -112,7 +112,7 @@ class _BaseCustomerService(customer_pb2_grpc.CustomerServiceServicer):
     def _submit(self, op: dict) -> dict:
         fut = asyncio.run_coroutine_threadsafe(self.replica.submit(op), self.loop)
         try:
-            result = fut.result(timeout=10)
+            result = fut.result(timeout=20)
         except concurrent_futures.TimeoutError:
             print(
                 "[customer replica timeout] " + json.dumps(self.replica.debug_state(), sort_keys=True),
@@ -361,7 +361,7 @@ async def _async_main(config_path: str, replica_id: int) -> None:
     replica = RotatingSequencerReplica(replica_id, peers, machine.apply)
     await replica.start()
 
-    buyer_server = grpc.server(futures.ThreadPoolExecutor(max_workers=20))
+    buyer_server = grpc.server(futures.ThreadPoolExecutor(max_workers=48))
     customer_pb2_grpc.add_CustomerServiceServicer_to_server(
         BuyerCustomerService(replica, machine, loop),
         buyer_server,
@@ -373,7 +373,7 @@ async def _async_main(config_path: str, replica_id: int) -> None:
         )
     buyer_server.start()
 
-    seller_server = grpc.server(futures.ThreadPoolExecutor(max_workers=20))
+    seller_server = grpc.server(futures.ThreadPoolExecutor(max_workers=48))
     customer_pb2_grpc.add_CustomerServiceServicer_to_server(
         SellerCustomerService(replica, machine, loop),
         seller_server,

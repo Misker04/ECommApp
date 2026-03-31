@@ -33,8 +33,8 @@ class GrpcReplicaPool(Generic[S]):
         targets: List[GrpcTarget],
         stub_factory: Callable[[grpc.Channel], S],
         *,
-        connect_timeout_s: float = 1.5,
-        call_timeout_s: float = 12.0,
+        connect_timeout_s: float = 2.0,
+        call_timeout_s: float = 20.0,
     ):
         if not targets:
             raise ValueError("at least one gRPC target is required")

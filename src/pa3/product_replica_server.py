@@ -180,10 +180,10 @@ class ProductService(product_pb2_grpc.ProductServiceServicer):
 
     def _submit_to_raft(self, command: dict) -> None:
         fut = asyncio.run_coroutine_threadsafe(self.node.submit(command), self.loop)
-        fut.result(timeout=8)
+        fut.result(timeout=20)
 
     async def _await_result(self, command_id: str) -> dict:
-        for _ in range(400):
+        for _ in range(2000):
             result = self.machine.take_completed(command_id)
             if result is not None:
                 return result
@@ -192,7 +192,7 @@ class ProductService(product_pb2_grpc.ProductServiceServicer):
 
     def _await_result_sync(self, command_id: str) -> dict:
         fut = asyncio.run_coroutine_threadsafe(self._await_result(command_id), self.loop)
-        return fut.result(timeout=8)
+        return fut.result(timeout=25)
 
     def _require_read_leader(self) -> None:
         leader_id = self.node.leader_hint()
@@ -503,7 +503,7 @@ async def _async_main(config_path: str, replica_id: int) -> None:
         customer_pb2_grpc.CustomerServiceStub,
     )
 
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=20))
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=48))
     product_pb2_grpc.add_ProductServiceServicer_to_server(
         ProductService(node, machine, loop, buyer_customer_pool, seller_customer_pool),
         server,
