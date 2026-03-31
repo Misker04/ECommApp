@@ -1,3 +1,62 @@
+cd ~/ECommApp
+export VM1_IP=10.224.78.177
+export VM2_IP=10.224.79.234
+export VM3_IP=10.224.79.55
+export VM4_IP=10.224.76.94
+cp config/pa3_4vm_example.yaml config/pa3_4vm.yaml
+sed -i \
+  -e "s/VM1_IP/${VM1_IP}/g" \
+  -e "s/VM2_IP/${VM2_IP}/g" \
+  -e "s/VM3_IP/${VM3_IP}/g" \
+  -e "s/VM4_IP/${VM4_IP}/g" \
+  config/pa3_4vm.yaml
+
+
+- - - -
+cd ~/ECommApp
+pkill -f 'src.pa3' || true
+pkill -f 'src.financial.soap_server' || true
+
+- - - -
+python3 ./scripts/run_pa3_vm.sh 1 config/pa3_4vm.yaml soap
+
+python3 ./scripts/run_pa3_vm.sh 1 config/pa3_4vm.yaml customers
+python3 ./scripts/run_pa3_vm.sh 2 config/pa3_4vm.yaml customers
+python3 ./scripts/run_pa3_vm.sh 3 config/pa3_4vm.yaml customers
+python3 ./scripts/run_pa3_vm.sh 4 config/pa3_4vm.yaml customers
+
+python3 scripts/wait_for_pa3_ready.py --config config/pa3_4vm.yaml --target customer --timeout 60
+
+- - - -
+python3 ./scripts/run_pa3_vm.sh 1 config/pa3_4vm.yaml products
+python3 ./scripts/run_pa3_vm.sh 2 config/pa3_4vm.yaml products
+python3 ./scripts/run_pa3_vm.sh 3 config/pa3_4vm.yaml products
+python3 ./scripts/run_pa3_vm.sh 4 config/pa3_4vm.yaml products
+
+python3 scripts/wait_for_pa3_ready.py --config config/pa3_4vm.yaml --target product --timeout 60
+
+- - - -
+python3 ./scripts/run_pa3_vm.sh 1 config/pa3_4vm.yaml frontends
+python3 ./scripts/run_pa3_vm.sh 2 config/pa3_4vm.yaml frontends
+python3 ./scripts/run_pa3_vm.sh 3 config/pa3_4vm.yaml frontends
+python3 ./scripts/run_pa3_vm.sh 4 config/pa3_4vm.yaml frontends
+
+- - - -
+U="seller$(date +%H%M%S)"
+curl -s -X POST "http://${VM1_IP}:58080/seller/create_account" \
+  -H 'Content-Type: application/json' \
+  -d "{\"username\":\"${U}\",\"password\":\"pw\"}"
+
+- - - -
+python3 -m src.clients.seller_cli --config config/pa3_4vm.yaml
+python3 -m src.clients.buyer_cli --config config/pa3_4vm.yaml
+
+- - - -
+python3 -m src.clients.bench.runner --config config/pa3_4vm.yaml --scenario 1 --runs 10 --ops_per_client 1000 --items_per_seller 5 --warmup 1
+python3 -m src.clients.bench.runner --config config/pa3_4vm.yaml --scenario 2 --runs 10 --ops_per_client 1000 --items_per_seller 5 --warmup 1
+python3 -m src.clients.bench.runner --config config/pa3_4vm.yaml --scenario 3 --runs 10 --ops_per_client 1000 --items_per_seller 5 --warmup 1
+
+
 # PA3 ECommApp
 
 This repository now contains a working PA3 layout for the distributed e-commerce app:
