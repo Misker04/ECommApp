@@ -13,6 +13,7 @@ PYTHON=${PYTHON:-python3}
 CUSTOMER_TIMEOUT=${CUSTOMER_TIMEOUT:-120}
 PRODUCT_TIMEOUT=${PRODUCT_TIMEOUT:-120}
 STOP_FIRST=${STOP_FIRST:-1}
+WAIT_FOR_CLUSTER=${WAIT_FOR_CLUSTER:-0}
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
@@ -36,16 +37,24 @@ fi
 log "starting local customer replicas"
 "$PYTHON" scripts/run_pa3_vm.py --config "$CFG" --vm-id "$VM_ID" --phase customers
 
-log "waiting for customer cluster readiness"
-"$PYTHON" scripts/wait_for_pa3_ready.py --config "$CFG" --target customer --timeout "$CUSTOMER_TIMEOUT"
+if [[ "$WAIT_FOR_CLUSTER" == "1" ]]; then
+  log "waiting for customer cluster readiness"
+  "$PYTHON" scripts/wait_for_pa3_ready.py --config "$CFG" --target customer --timeout "$CUSTOMER_TIMEOUT"
+fi
 
 log "starting local product replicas"
 "$PYTHON" scripts/run_pa3_vm.py --config "$CFG" --vm-id "$VM_ID" --phase products
 
-log "waiting for product cluster readiness"
-"$PYTHON" scripts/wait_for_pa3_ready.py --config "$CFG" --target product --timeout "$PRODUCT_TIMEOUT"
+if [[ "$WAIT_FOR_CLUSTER" == "1" ]]; then
+  log "waiting for product cluster readiness"
+  "$PYTHON" scripts/wait_for_pa3_ready.py --config "$CFG" --target product --timeout "$PRODUCT_TIMEOUT"
+fi
 
 log "starting local frontends"
 "$PYTHON" scripts/run_pa3_vm.py --config "$CFG" --vm-id "$VM_ID" --phase frontends
 
-log "restart complete"
+if [[ "$WAIT_FOR_CLUSTER" == "1" ]]; then
+  log "restart complete"
+else
+  log "local services launched; run wait_for_pa3_ready.py separately once all VMs are up"
+fi

@@ -335,45 +335,54 @@ PYTHON=.venv/bin/python ./scripts/run_pa3_vm.sh 4 config/pa3_4vm_example.yaml fr
 
 Linux single-command restart on each VM:
 
-Start this on all four VMs around the same time. Each VM script starts only its local services, then waits for global customer/product readiness before continuing.
+Start this on all four VMs around the same time. By default, each VM script starts only its local services and exits. After all four are up, run the readiness checks from one VM.
 
 ```bash
-chmod +x scripts/restart_pa3_vm.sh
+chmod +x scripts/restart_pa3_4vm.sh
 ```
 
 VM1:
 
 ```bash
 source .venv/bin/activate
-PYTHON=.venv/bin/python bash scripts/restart_pa3_vm.sh 1 config/pa3_4vm.yaml
+PYTHON=.venv/bin/python bash scripts/restart_pa3_4vm.sh 1 config/pa3_4vm.yaml
 ```
 
 VM2:
 
 ```bash
 source .venv/bin/activate
-PYTHON=.venv/bin/python bash scripts/restart_pa3_vm.sh 2 config/pa3_4vm.yaml
+PYTHON=.venv/bin/python bash scripts/restart_pa3_4vm.sh 2 config/pa3_4vm.yaml
 ```
 
 VM3:
 
 ```bash
 source .venv/bin/activate
-PYTHON=.venv/bin/python bash scripts/restart_pa3_vm.sh 3 config/pa3_4vm.yaml
+PYTHON=.venv/bin/python bash scripts/restart_pa3_4vm.sh 3 config/pa3_4vm.yaml
 ```
 
 VM4:
 
 ```bash
 source .venv/bin/activate
-PYTHON=.venv/bin/python bash scripts/restart_pa3_vm.sh 4 config/pa3_4vm.yaml
+PYTHON=.venv/bin/python bash scripts/restart_pa3_4vm.sh 4 config/pa3_4vm.yaml
 ```
 
 Optional environment variables:
 
 - `STOP_FIRST=0` to skip the local `pkill` step
+- `WAIT_FOR_CLUSTER=1` to make that VM also wait for global customer/product readiness
 - `CUSTOMER_TIMEOUT=180` to wait longer for the customer barrier
 - `PRODUCT_TIMEOUT=180` to wait longer for the product barrier
+
+After all four VMs finish the local restart, run from one VM:
+
+```bash
+source .venv/bin/activate
+python3 scripts/wait_for_pa3_ready.py --config config/pa3_4vm.yaml --target customer --timeout 180
+python3 scripts/wait_for_pa3_ready.py --config config/pa3_4vm.yaml --target product --timeout 180
+```
 
 Then run the CLIs or benchmark from any machine that can reach all four frontend replicas:
 
