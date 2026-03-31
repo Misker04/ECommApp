@@ -1,0 +1,82 @@
+session_timeout_seconds: 300
+
+# Replace VM1_IP..VM4_IP with the actual reachable IPs or hostnames of your VMs.
+#
+# VM layout used by scripts/run_pa3_vm.py:
+# - VM1: soap, customer_0, product_0, seller_fe_0, buyer_fe_0
+# - VM2: customer_1, product_1, seller_fe_1, buyer_fe_1
+# - VM3: customer_2, customer_4, product_2, seller_fe_2, buyer_fe_2
+# - VM4: customer_3, product_3, product_4, seller_fe_3, buyer_fe_3
+
+customer_replicas:
+  - id: 0
+    host: "VM1_IP"
+    buyer_grpc_port: 51051
+    seller_grpc_port: 51053
+    udp_port: 60000
+  - id: 1
+    host: "VM2_IP"
+    buyer_grpc_port: 51151
+    seller_grpc_port: 51153
+    udp_port: 60001
+  - id: 2
+    host: "VM3_IP"
+    buyer_grpc_port: 51251
+    seller_grpc_port: 51253
+    udp_port: 60002
+  - id: 3
+    host: "VM4_IP"
+    buyer_grpc_port: 51351
+    seller_grpc_port: 51353
+    udp_port: 60003
+  - id: 4
+    host: "VM3_IP"
+    buyer_grpc_port: 51451
+    seller_grpc_port: 51453
+    udp_port: 60004
+
+product_replicas:
+  - id: 0
+    host: "VM1_IP"
+    grpc_port: 52052
+    raft_port: 60100
+  - id: 1
+    host: "VM2_IP"
+    grpc_port: 52152
+    raft_port: 60101
+  - id: 2
+    host: "VM3_IP"
+    grpc_port: 52252
+    raft_port: 60102
+  - id: 3
+    host: "VM4_IP"
+    grpc_port: 52352
+    raft_port: 60103
+  - id: 4
+    host: "VM4_IP"
+    grpc_port: 52452
+    raft_port: 60104
+
+buyer_frontend_replicas:
+  - host: "VM1_IP"
+    port: 58090
+  - host: "VM2_IP"
+    port: 58091
+  - host: "VM3_IP"
+    port: 58092
+  - host: "VM4_IP"
+    port: 58093
+
+seller_frontend_replicas:
+  - host: "VM1_IP"
+    port: 58080
+  - host: "VM2_IP"
+    port: 58081
+  - host: "VM3_IP"
+    port: 58082
+  - host: "VM4_IP"
+    port: 58083
+
+soap:
+  host: "VM1_IP"
+  port: 8000

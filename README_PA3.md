@@ -17,8 +17,14 @@ This repository now contains a working PA3 layout for the distributed e-commerce
   contains the PA3-aware buyer CLI, seller CLI, and benchmark runner
 - `config/pa3_local.yaml`
   contains the local Windows configuration for 5 customer replicas, 5 product replicas, 4 buyer frontends, 4 seller frontends, and SOAP
+- `config/pa3_4vm_example.yaml`
+  contains a shared 4-VM deployment template; replace `VM1_IP`..`VM4_IP` with your actual VM addresses
 - `scripts/run_pa3_cluster.ps1`
   starts the local PA3 cluster on Windows
+- `scripts/run_pa3_vm.py`
+  starts only the service subset assigned to one VM in the 4-VM layout
+- `scripts/run_pa3_vm.ps1` / `scripts/run_pa3_vm.sh`
+  convenience wrappers for the 4-VM launcher on Windows and Linux
 - `scripts/stop_pa3_cluster.ps1`
   stops PA3 listeners on Windows by the configured ports
 
@@ -67,6 +73,194 @@ Start the CLIs in separate terminals:
 
 ```powershell
 .\.venv310\Scripts\python.exe -m src.clients.bench.runner --config config/pa3_local.yaml --scenario 3 --runs 10 --ops_per_client 1000 --items_per_seller 5 --warmup 1
+```
+
+## Four-VM deployment
+
+Edit `config/pa3_4vm_example.yaml` first and replace:
+
+- `VM1_IP`
+- `VM2_IP`
+- `VM3_IP`
+- `VM4_IP`
+
+The provided VM layout is:
+
+- VM1: `soap`, `customer_0`, `product_0`, `seller_fe_0`, `buyer_fe_0`
+- VM2: `customer_1`, `product_1`, `seller_fe_1`, `buyer_fe_1`
+- VM3: `customer_2`, `customer_4`, `product_2`, `seller_fe_2`, `buyer_fe_2`
+- VM4: `customer_3`, `product_3`, `product_4`, `seller_fe_3`, `buyer_fe_3`
+
+Use phased startup in the VMs:
+
+1. Start `soap` on VM1.
+2. Start `customers` on all four VMs.
+3. Wait for the customer cluster to become ready.
+4. Start `products` on all four VMs.
+5. Wait for the product cluster to become ready.
+6. Start `frontends` on all four VMs.
+
+Windows PowerShell startup:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\.venv310\Scripts\Activate.ps1
+.\scripts\run_pa3_vm.ps1 -VmId 1 -Phase soap -Config config/pa3_4vm_example.yaml
+```
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\.venv310\Scripts\Activate.ps1
+.\scripts\run_pa3_vm.ps1 -VmId 1 -Phase customers -Config config/pa3_4vm_example.yaml
+```
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\.venv310\Scripts\Activate.ps1
+.\scripts\run_pa3_vm.ps1 -VmId 2 -Phase customers -Config config/pa3_4vm_example.yaml
+```
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\.venv310\Scripts\Activate.ps1
+.\scripts\run_pa3_vm.ps1 -VmId 3 -Phase customers -Config config/pa3_4vm_example.yaml
+```
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\.venv310\Scripts\Activate.ps1
+.\scripts\run_pa3_vm.ps1 -VmId 4 -Phase customers -Config config/pa3_4vm_example.yaml
+```
+
+After all customer replicas are up, verify customer readiness from any VM:
+
+```powershell
+.\.venv310\Scripts\python.exe scripts\wait_for_pa3_ready.py --config config/pa3_4vm_example.yaml --target customer --timeout 60
+```
+
+```powershell
+.\scripts\run_pa3_vm.ps1 -VmId 1 -Phase products -Config config/pa3_4vm_example.yaml
+```
+
+```powershell
+.\scripts\run_pa3_vm.ps1 -VmId 2 -Phase products -Config config/pa3_4vm_example.yaml
+```
+
+```powershell
+.\scripts\run_pa3_vm.ps1 -VmId 3 -Phase products -Config config/pa3_4vm_example.yaml
+```
+
+```powershell
+.\scripts\run_pa3_vm.ps1 -VmId 4 -Phase products -Config config/pa3_4vm_example.yaml
+```
+
+After all product replicas are up, verify product readiness from any VM:
+
+```powershell
+.\.venv310\Scripts\python.exe scripts\wait_for_pa3_ready.py --config config/pa3_4vm_example.yaml --target product --timeout 60
+```
+
+```powershell
+.\scripts\run_pa3_vm.ps1 -VmId 1 -Phase frontends -Config config/pa3_4vm_example.yaml
+```
+
+```powershell
+.\scripts\run_pa3_vm.ps1 -VmId 2 -Phase frontends -Config config/pa3_4vm_example.yaml
+```
+
+```powershell
+.\scripts\run_pa3_vm.ps1 -VmId 3 -Phase frontends -Config config/pa3_4vm_example.yaml
+```
+
+```powershell
+.\scripts\run_pa3_vm.ps1 -VmId 4 -Phase frontends -Config config/pa3_4vm_example.yaml
+```
+
+Linux startup:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+PYTHON=.venv/bin/python ./scripts/run_pa3_vm.sh 1 config/pa3_4vm_example.yaml soap
+```
+
+```bash
+source .venv/bin/activate
+PYTHON=.venv/bin/python ./scripts/run_pa3_vm.sh 1 config/pa3_4vm_example.yaml customers
+```
+
+```bash
+source .venv/bin/activate
+PYTHON=.venv/bin/python ./scripts/run_pa3_vm.sh 2 config/pa3_4vm_example.yaml customers
+```
+
+```bash
+source .venv/bin/activate
+PYTHON=.venv/bin/python ./scripts/run_pa3_vm.sh 3 config/pa3_4vm_example.yaml customers
+```
+
+```bash
+source .venv/bin/activate
+PYTHON=.venv/bin/python ./scripts/run_pa3_vm.sh 4 config/pa3_4vm_example.yaml customers
+```
+
+After all customer replicas are up, verify customer readiness from any VM:
+
+```bash
+python3 scripts/wait_for_pa3_ready.py --config config/pa3_4vm_example.yaml --target customer --timeout 60
+```
+
+```bash
+PYTHON=.venv/bin/python ./scripts/run_pa3_vm.sh 1 config/pa3_4vm_example.yaml products
+```
+
+```bash
+PYTHON=.venv/bin/python ./scripts/run_pa3_vm.sh 2 config/pa3_4vm_example.yaml products
+```
+
+```bash
+PYTHON=.venv/bin/python ./scripts/run_pa3_vm.sh 3 config/pa3_4vm_example.yaml products
+```
+
+```bash
+PYTHON=.venv/bin/python ./scripts/run_pa3_vm.sh 4 config/pa3_4vm_example.yaml products
+```
+
+After all product replicas are up, verify product readiness from any VM:
+
+```bash
+python3 scripts/wait_for_pa3_ready.py --config config/pa3_4vm_example.yaml --target product --timeout 60
+```
+
+```bash
+PYTHON=.venv/bin/python ./scripts/run_pa3_vm.sh 1 config/pa3_4vm_example.yaml frontends
+```
+
+```bash
+PYTHON=.venv/bin/python ./scripts/run_pa3_vm.sh 2 config/pa3_4vm_example.yaml frontends
+```
+
+```bash
+PYTHON=.venv/bin/python ./scripts/run_pa3_vm.sh 3 config/pa3_4vm_example.yaml frontends
+```
+
+```bash
+PYTHON=.venv/bin/python ./scripts/run_pa3_vm.sh 4 config/pa3_4vm_example.yaml frontends
+```
+
+Then run the CLIs or benchmark from any machine that can reach all four frontend replicas:
+
+```bash
+python3 -m src.clients.seller_cli --config config/pa3_4vm_example.yaml
+```
+
+```bash
+python3 -m src.clients.buyer_cli --config config/pa3_4vm_example.yaml
+```
+
+```bash
+python3 -m src.clients.bench.runner --config config/pa3_4vm_example.yaml --scenario 1 --runs 10 --ops_per_client 1000 --items_per_seller 5 --warmup 1
 ```
 
 ## Replication notes

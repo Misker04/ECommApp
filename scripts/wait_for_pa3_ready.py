@@ -4,8 +4,14 @@ import argparse
 import sys
 import time
 import uuid
+from pathlib import Path
 
 import grpc
+
+
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from src.pa3.config import load_pa3_config
 from src.pa3.frontend.grpc_pool import GrpcReplicaPool, GrpcTarget
