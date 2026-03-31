@@ -11,7 +11,6 @@ sed -i \
   -e "s/VM4_IP/${VM4_IP}/g" \
   config/pa3_4vm.yaml
 
-
 - - - -
 cd ~/ECommApp
 pkill -f 'src.pa3' || true
