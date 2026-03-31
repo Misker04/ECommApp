@@ -23,8 +23,8 @@ def wait_for_customer(cfg, timeout_s: float) -> None:
     pool = GrpcReplicaPool(
         [GrpcTarget(r.host, r.seller_grpc_port) for r in cfg.customer_replicas],
         customer_pb2_grpc.CustomerServiceStub,
-        connect_timeout_s=0.5,
-        call_timeout_s=2.0,
+        connect_timeout_s=1.5,
+        call_timeout_s=min(12.0, max(4.0, timeout_s / 6.0)),
     )
     deadline = time.monotonic() + timeout_s
     last_error: Exception | None = None
@@ -48,8 +48,8 @@ def wait_for_product(cfg, timeout_s: float) -> None:
     pool = GrpcReplicaPool(
         [GrpcTarget(r.host, r.grpc_port) for r in cfg.product_replicas],
         product_pb2_grpc.ProductServiceStub,
-        connect_timeout_s=0.5,
-        call_timeout_s=2.0,
+        connect_timeout_s=1.0,
+        call_timeout_s=min(8.0, max(3.0, timeout_s / 8.0)),
     )
     deadline = time.monotonic() + timeout_s
     last_error: Exception | None = None
