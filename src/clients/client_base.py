@@ -1,4 +1,5 @@
 from collections.abc import Iterable
+from threading import Lock
 
 import requests
 
@@ -7,6 +8,9 @@ class MarketplaceClient:
     """
     Base REST client for Buyer and Seller CLI (PA2).
     """
+
+    _next_start_index = 0
+    _start_index_lock = Lock()
 
     def __init__(self, base_url: str | Iterable[str]):
         if isinstance(base_url, str):
@@ -17,7 +21,9 @@ class MarketplaceClient:
             raise ValueError("at least one frontend URL is required")
 
         self.base_urls = urls
-        self.current_index = 0
+        with self._start_index_lock:
+            self.current_index = self._next_start_index % len(self.base_urls)
+            MarketplaceClient._next_start_index += 1
         self.session_id = None
 
     @property

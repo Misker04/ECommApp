@@ -7,6 +7,7 @@ import sys
 import time
 from concurrent import futures
 import concurrent.futures as concurrent_futures
+from threading import Lock
 
 import grpc
 
@@ -66,7 +67,11 @@ class CustomerStateMachine:
                 self.store.logout(op["session_token"])
                 return {"ok": True}
             if kind == "touch_session":
-                touched = self.store.touch_session(op["session_token"], int(op["activity_ms"]))
+                touched = self.store.touch_session(
+                    op["session_token"],
+                    int(op["activity_ms"]),
+                    self.timeout_seconds,
+                )
                 if not touched:
                     raise ValueError("invalid session")
                 return {"ok": True}
@@ -98,6 +103,11 @@ class _BaseCustomerService(customer_pb2_grpc.CustomerServiceServicer):
         self.replica = replica
         self.machine = machine
         self.loop = loop
+        self._touch_lock = Lock()
+        # Reads should not turn into a replicated write for every single request.
+        # Periodic touch replication is enough to keep sessions fresh across replicas.
+        self._touch_replication_interval_ms = 5000
+        self._last_replicated_touch_ms: dict[str, int] = {}
 
     def _submit(self, op: dict) -> dict:
         fut = asyncio.run_coroutine_threadsafe(self.replica.submit(op), self.loop)
@@ -122,14 +132,43 @@ class _BaseCustomerService(customer_pb2_grpc.CustomerServiceServicer):
             self.machine.timeout_seconds,
         )
 
-    def _touch_session(self, session_token: str) -> None:
+    def _touch_session(self, session_token: str, *, force_replicate: bool = False) -> None:
+        now_ms = _now_ms()
+        touched = self.machine.store.touch_session(
+            session_token,
+            now_ms,
+            self.machine.timeout_seconds,
+        )
+        if not touched:
+            raise ValueError("invalid session")
+
+        should_replicate = force_replicate
+        if not should_replicate:
+            with self._touch_lock:
+                last_ms = self._last_replicated_touch_ms.get(session_token, 0)
+            should_replicate = (now_ms - last_ms) >= self._touch_replication_interval_ms
+
+        if not should_replicate:
+            return
+
         self._submit(
             {
                 "kind": "touch_session",
                 "session_token": session_token,
-                "activity_ms": _now_ms(),
+                "activity_ms": now_ms,
             }
         )
+        with self._touch_lock:
+            self._last_replicated_touch_ms[session_token] = now_ms
+
+    def _touch_session_best_effort(self, session_token: str) -> None:
+        try:
+            self._touch_session(session_token)
+        except Exception:
+            # Session validation/read paths should stay available as long as the local
+            # replica has a fresh enough session entry. Replicated touch updates are
+            # best-effort to reduce customer-cluster write amplification under load.
+            pass
 
     def RecordSellerFeedback(self, request, context):
         try:
@@ -200,10 +239,7 @@ class BuyerCustomerService(_BaseCustomerService):
     def ValidateSession(self, request, context):
         ok, principal_id = self._validate_local(request.session_token)
         if ok:
-            try:
-                self._touch_session(request.session_token)
-            except Exception as exc:
-                _abort_for_store_error(context, exc, grpc.StatusCode.UNAVAILABLE)
+            self._touch_session_best_effort(request.session_token)
         return customer_pb2.SessionInfo(valid=ok, principal_id=principal_id, role="buyer" if ok else "")
 
     def GetSellerRating(self, request, context):
@@ -211,7 +247,7 @@ class BuyerCustomerService(_BaseCustomerService):
         if not ok:
             raise ServiceAbortError(grpc.StatusCode.UNAUTHENTICATED, "invalid session")
         try:
-            self._touch_session(request.session_token)
+            self._touch_session_best_effort(request.session_token)
             up, down = self.machine.store.get_seller_rating(int(request.seller_id))
             return customer_pb2.RatingResponse(thumbs_up=up, thumbs_down=down)
         except Exception as exc:
@@ -222,7 +258,7 @@ class BuyerCustomerService(_BaseCustomerService):
         if not ok:
             raise ServiceAbortError(grpc.StatusCode.UNAUTHENTICATED, "invalid buyer session")
         try:
-            self._touch_session(request.session_token)
+            self._touch_session_best_effort(request.session_token)
             items = self.machine.store.get_buyer_purchases(
                 request.session_token,
                 _now_ms(),
@@ -283,6 +319,8 @@ class SellerCustomerService(_BaseCustomerService):
 
     def Logout(self, request, context):
         try:
+            with self._touch_lock:
+                self._last_replicated_touch_ms.pop(request.session_token, None)
             self._submit({"kind": "logout", "session_token": request.session_token})
             return customer_pb2.Empty()
         except Exception as exc:
@@ -291,10 +329,7 @@ class SellerCustomerService(_BaseCustomerService):
     def ValidateSession(self, request, context):
         ok, principal_id = self._validate_local(request.session_token)
         if ok:
-            try:
-                self._touch_session(request.session_token)
-            except Exception as exc:
-                _abort_for_store_error(context, exc, grpc.StatusCode.UNAVAILABLE)
+            self._touch_session_best_effort(request.session_token)
         return customer_pb2.SessionInfo(valid=ok, principal_id=principal_id, role="seller" if ok else "")
 
     def GetSellerRating(self, request, context):
@@ -302,7 +337,7 @@ class SellerCustomerService(_BaseCustomerService):
         if not ok:
             raise ServiceAbortError(grpc.StatusCode.UNAUTHENTICATED, "invalid session")
         try:
-            self._touch_session(request.session_token)
+            self._touch_session_best_effort(request.session_token)
             up, down = self.machine.store.get_seller_rating(int(request.seller_id))
             return customer_pb2.RatingResponse(thumbs_up=up, thumbs_down=down)
         except Exception as exc:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import socket
 import sys
 import time
 from dataclasses import dataclass
@@ -46,11 +47,11 @@ class RotatingSequencerReplica:
         self.inbox: asyncio.Queue[dict] = asyncio.Queue()
         self.started = False
         self._last_receipt_advertisement = 0.0
-        self._receipt_advertise_interval_s = 0.2
+        self._receipt_advertise_interval_s = 0.05
         self._last_pending_rebroadcast = 0.0
-        self._pending_rebroadcast_interval_s = 0.5
-        self._request_repair_batch = 32
-        self._sequence_repair_batch = 64
+        self._pending_rebroadcast_interval_s = 0.05
+        self._request_repair_batch = 256
+        self._sequence_repair_batch = 256
 
         self._pump_task: asyncio.Task | None = None
         self._background_task: asyncio.Task | None = None
@@ -61,9 +62,14 @@ class RotatingSequencerReplica:
 
         loop = asyncio.get_running_loop()
         me = self.peer_by_id[self.node_id]
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 * 1024 * 1024)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4 * 1024 * 1024)
+        sock.bind((me.host, me.port))
         transport, _ = await loop.create_datagram_endpoint(
             lambda: _UdpProtocol(self._enqueue_raw),
-            local_addr=(me.host, me.port),
+            sock=sock,
         )
 
         self.transport = transport

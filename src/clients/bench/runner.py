@@ -36,7 +36,7 @@ RUN_TAG = secrets.token_hex(3)
 
 
 @dataclass
-class Stats:
+class OperationStats:
     latencies: List[float] = field(default_factory=list)
     ok: int = 0
     err: int = 0
@@ -69,12 +69,33 @@ class Stats:
         return xs[k]
 
 
+@dataclass
+class Stats(OperationStats):
+    per_op: Dict[str, OperationStats] = field(default_factory=dict)
+
+    def add_op(self, op_name: str, dt: float, ok: bool) -> None:
+        self.add(dt, ok)
+        op_stats = self.per_op.setdefault(op_name, OperationStats())
+        op_stats.add(dt, ok)
+
+    def merge(self, other: "Stats") -> None:
+        self.latencies.extend(other.latencies)
+        self.ok += other.ok
+        self.err += other.err
+        for op_name, op_stats in other.per_op.items():
+            merged = self.per_op.setdefault(op_name, OperationStats())
+            merged.latencies.extend(op_stats.latencies)
+            merged.ok += op_stats.ok
+            merged.err += op_stats.err
+
+
 # --------------------------------------------------
 # Timed REST call helper
 # --------------------------------------------------
 
 def timed_call(
     client: MarketplaceClient,
+    op_name: str,
     endpoint: str,
     payload: Dict[str, Any],
     stats: Stats,
@@ -87,7 +108,7 @@ def timed_call(
         resp = {}
         ok = False
     t1 = time.perf_counter()
-    stats.add(t1 - t0, ok)
+    stats.add_op(op_name, t1 - t0, ok)
     return resp
 
 
@@ -122,14 +143,14 @@ def seller_workload(
 
     # 1) CreateAccount
     ca_resp = timed_call(
-        client, "seller/create_account",
+        client, "seller/create_account", "seller/create_account",
         {"username": username, "password": "pw"},
         stats,
     )
 
     # 2) Login
     resp = timed_call(
-        client, "seller/login",
+        client, "seller/login", "seller/login",
         {"username": username, "password": "pw"},
         stats,
     )
@@ -149,7 +170,7 @@ def seller_workload(
         price = float(rng.randint(10, 100))
         qty = rng.randint(5000, 12000)
         rr = timed_call(
-            client, "seller/register_item",
+            client, "seller/register_item", "seller/register_item",
             {
                 "name": name,
                 "category": category,
@@ -178,7 +199,7 @@ def seller_workload(
         if p < 0.50:
             # DisplayItemsForSale
             timed_call(
-                client, "seller/display_items",
+                client, "seller/display_items", "seller/display_items",
                 {"session_token": session_token},
                 stats,
             )
@@ -188,7 +209,7 @@ def seller_workload(
             iid = rng.choice(created_item_ids)
             new_price = float(rng.randint(5, 200))
             timed_call(
-                client, "seller/change_price",
+                client, "seller/change_price", "seller/change_price",
                 {"item_id": iid, "new_price": new_price, "session_token": session_token},
                 stats,
             )
@@ -197,7 +218,7 @@ def seller_workload(
             # UpdateUnitsForSale
             iid = rng.choice(created_item_ids)
             timed_call(
-                client, "seller/update_quantity",
+                client, "seller/update_quantity", "seller/update_quantity",
                 {"item_id": iid, "quantity": 1, "session_token": session_token},
                 stats,
             )
@@ -206,20 +227,20 @@ def seller_workload(
             # GetSellerRating (seller checks their own rating)
             if seller_id:
                 timed_call(
-                    client, "seller/get_rating",
+                    client, "seller/get_rating", "seller/get_rating",
                     {"session_token": session_token, "seller_id": int(seller_id)},
                     stats,
                 )
             else:
                 timed_call(
-                    client, "seller/display_items",
+                    client, "seller/display_items", "seller/display_items",
                     {"session_token": session_token},
                     stats,
                 )
 
     # 5) Logout
     timed_call(
-        client, "seller/logout",
+        client, "seller/logout", "seller/logout",
         {"session_token": session_token},
         stats,
     )
@@ -254,14 +275,14 @@ def buyer_workload(
 
     # 1) CreateAccount
     timed_call(
-        client, "buyer/create_account",
+        client, "buyer/create_account", "buyer/create_account",
         {"username": username, "password": "pw"},
         stats,
     )
 
     # 2) Login
     resp = timed_call(
-        client, "buyer/login",
+        client, "buyer/login", "buyer/login",
         {"username": username, "password": "pw"},
         stats,
     )
@@ -284,7 +305,7 @@ def buyer_workload(
             # SearchItemsForSale
             cat = rng.randint(1, 3)
             timed_call(
-                client, "buyer/search",
+                client, "buyer/search", "buyer/search",
                 {"item_category": cat, "session_token": session_token},
                 stats,
             )
@@ -292,7 +313,7 @@ def buyer_workload(
         elif p < 0.35 and iid:
             # GetItem
             timed_call(
-                client, "buyer/get_item",
+                client, "buyer/get_item", "buyer/get_item",
                 {"item_id": iid, "session_token": session_token},
                 stats,
             )
@@ -300,7 +321,7 @@ def buyer_workload(
         elif p < 0.50 and iid:
             # AddItemToCart
             timed_call(
-                client, "buyer/add_to_cart",
+                client, "buyer/add_to_cart", "buyer/add_to_cart",
                 {"item_id": iid, "quantity": 1, "session_token": session_token},
                 stats,
             )
@@ -309,7 +330,7 @@ def buyer_workload(
         elif p < 0.60 and iid:
             # RemoveItemFromCart
             timed_call(
-                client, "buyer/remove_from_cart",
+                client, "buyer/remove_from_cart", "buyer/remove_from_cart",
                 {"item_id": iid, "quantity": 1, "session_token": session_token},
                 stats,
             )
@@ -317,7 +338,7 @@ def buyer_workload(
         elif p < 0.68:
             # DisplayCart
             timed_call(
-                client, "buyer/display_cart",
+                client, "buyer/display_cart", "buyer/display_cart",
                 {"session_token": session_token},
                 stats,
             )
@@ -325,7 +346,7 @@ def buyer_workload(
         elif p < 0.74:
             # SaveCart
             timed_call(
-                client, "buyer/save_cart",
+                client, "buyer/save_cart", "buyer/save_cart",
                 {"session_token": session_token},
                 stats,
             )
@@ -333,7 +354,7 @@ def buyer_workload(
         elif p < 0.79:
             # ClearCart
             timed_call(
-                client, "buyer/clear_cart",
+                client, "buyer/clear_cart", "buyer/clear_cart",
                 {"session_token": session_token},
                 stats,
             )
@@ -343,7 +364,7 @@ def buyer_workload(
             # ProvideFeedback
             vote = "up" if rng.random() < 0.7 else "down"
             timed_call(
-                client, "buyer/provide_feedback",
+                client, "buyer/provide_feedback", "buyer/provide_feedback",
                 {"item_id": iid, "feedback": vote, "session_token": session_token},
                 stats,
             )
@@ -351,7 +372,7 @@ def buyer_workload(
         elif p < 0.91 and sid:
             # GetSellerRating
             timed_call(
-                client, "buyer/get_seller_rating",
+                client, "buyer/get_seller_rating", "buyer/get_seller_rating",
                 {"seller_id": sid, "session_token": session_token},
                 stats,
             )
@@ -359,7 +380,7 @@ def buyer_workload(
         elif p < 0.95:
             # GetBuyerPurchases
             timed_call(
-                client, "buyer/get_purchases",
+                client, "buyer/get_purchases", "buyer/get_purchases",
                 {"session_token": session_token},
                 stats,
             )
@@ -370,12 +391,12 @@ def buyer_workload(
             if cart_has_items and iid:
                 # Ensure something is in cart before purchasing
                 timed_call(
-                    client, "buyer/add_to_cart",
+                    client, "buyer/add_to_cart", "buyer/add_to_cart",
                     {"item_id": iid, "quantity": 1, "session_token": session_token},
                     stats,
                 )
                 timed_call(
-                    client, "buyer/make_purchase",
+                    client, "buyer/make_purchase", "buyer/make_purchase",
                     {
                         "session_token": session_token,
                         "card_name": "Bench User",
@@ -389,14 +410,14 @@ def buyer_workload(
             else:
                 # Fallback to search if cart is empty
                 timed_call(
-                    client, "buyer/search",
+                    client, "buyer/search", "buyer/search",
                     {"item_category": rng.randint(1, 3), "session_token": session_token},
                     stats,
                 )
 
     # 4) Logout
     timed_call(
-        client, "buyer/logout",
+        client, "buyer/logout", "buyer/logout",
         {"session_token": session_token},
         stats,
     )
@@ -464,14 +485,10 @@ def run_one(
     all_stats = Stats()
     for f in seller_futures:
         st, _ = f.result()
-        all_stats.latencies.extend(st.latencies)
-        all_stats.ok += st.ok
-        all_stats.err += st.err
+        all_stats.merge(st)
     for f in buyer_futures:
         st = f.result()
-        all_stats.latencies.extend(st.latencies)
-        all_stats.ok += st.ok
-        all_stats.err += st.err
+        all_stats.merge(st)
 
     duration = t1 - t0
     total_ops = (n_buyers + n_sellers) * ops_per_client
@@ -494,6 +511,7 @@ def main() -> None:
     ap.add_argument("--items_per_seller", type=int, default=5)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--warmup", type=int, default=1, help="number of warmup runs (not counted)")
+    ap.add_argument("--label", default="normal", help="scenario label for the report, e.g. normal/frontend_failed/product_leader_failed")
     args = ap.parse_args()
 
     if args.scenario == 1:
@@ -521,6 +539,7 @@ def main() -> None:
 
     run_avgs: List[float] = []
     run_throughputs: List[float] = []
+    aggregate_stats = Stats()
 
     for r in range(args.runs):
         avg_resp, throughput, st = run_one(
@@ -535,6 +554,7 @@ def main() -> None:
         )
         run_avgs.append(avg_resp)
         run_throughputs.append(throughput)
+        aggregate_stats.merge(st)
         print(
             f"run {r+1}/{args.runs}: avg_resp={avg_resp:.6f}s "
             f"p50={st.p50:.6f}s p95={st.p95:.6f}s "
@@ -545,9 +565,17 @@ def main() -> None:
     avg_throughput = statistics.fmean(run_throughputs) if run_throughputs else 0.0
 
     print("\n=== PA3 Report Numbers ===")
+    print(f"label={args.label}")
     print(f"scenario={args.scenario} sellers={n_sellers} buyers={n_buyers}")
     print(f"average_response_time_over_{args.runs}_runs={avg_of_avgs:.6f}s")
     print(f"average_throughput_over_{args.runs}_runs={avg_throughput:.2f} ops/s")
+    print("\n=== PA3 Per-Function Response Times ===")
+    for op_name in sorted(aggregate_stats.per_op):
+        op_stats = aggregate_stats.per_op[op_name]
+        print(
+            f"{op_name}: avg_resp={op_stats.avg:.6f}s "
+            f"count={op_stats.count} ok={op_stats.ok} err={op_stats.err}"
+        )
 
 
 if __name__ == "__main__":

@@ -25,6 +25,9 @@ class GrpcTarget:
 
 
 class GrpcReplicaPool(Generic[S]):
+    _next_start_index = 0
+    _start_index_lock = Lock()
+
     def __init__(
         self,
         targets: List[GrpcTarget],
@@ -39,7 +42,9 @@ class GrpcReplicaPool(Generic[S]):
         self.stub_factory = stub_factory
         self.connect_timeout_s = connect_timeout_s
         self.call_timeout_s = call_timeout_s
-        self.current_index = 0
+        with self._start_index_lock:
+            self.current_index = self._next_start_index % len(self.targets)
+            GrpcReplicaPool._next_start_index += 1
         self._lock = Lock()
 
     def _ordered_indices(self) -> list[int]:
