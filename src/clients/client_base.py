@@ -1,3 +1,5 @@
+from collections.abc import Iterable
+
 import requests
 
 
@@ -6,9 +8,25 @@ class MarketplaceClient:
     Base REST client for Buyer and Seller CLI (PA2).
     """
 
-    def __init__(self, base_url: str):
-        self.base_url = base_url.rstrip("/")
+    def __init__(self, base_url: str | Iterable[str]):
+        if isinstance(base_url, str):
+            urls = [base_url.rstrip("/")]
+        else:
+            urls = [str(url).rstrip("/") for url in base_url if str(url).strip()]
+        if not urls:
+            raise ValueError("at least one frontend URL is required")
+
+        self.base_urls = urls
+        self.current_index = 0
         self.session_id = None
+
+    @property
+    def current_base_url(self) -> str:
+        return self.base_urls[self.current_index]
+
+    @staticmethod
+    def _should_retry_status(status_code: int) -> bool:
+        return status_code in {502, 503, 504}
 
     # ---------------------------------
     # Core REST sender
@@ -30,23 +48,33 @@ class MarketplaceClient:
             payload = dict(payload)
             payload["session_token"] = self.session_id
 
-        url = f"{self.base_url}/{endpoint}"
+        last_error: Exception | None = None
 
-        try:
-            response = requests.post(
-                url,
-                json=payload,
-                timeout=10  # important for performance testing
-            )
-        except requests.exceptions.RequestException as e:
-            raise Exception(f"Connection error: {e}")
+        for offset in range(len(self.base_urls)):
+            idx = (self.current_index + offset) % len(self.base_urls)
+            url = f"{self.base_urls[idx]}/{endpoint}"
 
-        if response.status_code != 200:
-            raise Exception(
-                f"Request failed ({response.status_code}): {response.text}"
-            )
+            try:
+                response = requests.post(
+                    url,
+                    json=payload,
+                    timeout=10,
+                )
+            except requests.exceptions.RequestException as e:
+                last_error = Exception(f"Connection error to {url}: {e}")
+                continue
 
-        return response.json()
+            if response.status_code == 200:
+                self.current_index = idx
+                return response.json()
+
+            error = Exception(f"Request failed ({response.status_code}): {response.text}")
+            if len(self.base_urls) > 1 and self._should_retry_status(response.status_code):
+                last_error = error
+                continue
+            raise error
+
+        raise last_error or Exception("All frontend replicas failed")
 
     # ---------------------------------
     # Session Handling

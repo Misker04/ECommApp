@@ -3,8 +3,8 @@ from __future__ import annotations
 import argparse
 import shlex
 
-from src.common.config import load_config
 from src.clients.client_base import MarketplaceClient
+from src.clients.runtime_config import frontend_base_urls
 
 
 HELP = """Buyer CLI commands:
@@ -226,10 +226,7 @@ def main() -> None:
     ap.add_argument("--config", required=True)
     args = ap.parse_args()
 
-    cfg = load_config(args.config)
-    base_url = f"http://{cfg.frontend_buyer.host}:{cfg.frontend_buyer.port}"
-
-    client = MarketplaceClient(base_url)
+    client = MarketplaceClient(frontend_base_urls(args.config, "buyer"))
     repl(client)
 
 

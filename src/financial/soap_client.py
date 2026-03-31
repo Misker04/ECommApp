@@ -11,9 +11,8 @@ class SOAPClient:
 
     def __init__(self, wsdl_url: str):
         session = Session()
-        session.timeout = 5  # prevent hanging
 
-        transport = Transport(session=session)
+        transport = Transport(session=session, timeout=5, operation_timeout=5)
 
         self.client = Client(
             wsdl=wsdl_url,

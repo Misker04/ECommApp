@@ -1,0 +1,74 @@
+session_timeout_seconds: 300
+
+customer_replicas:
+  - id: 0
+    host: 127.0.0.1
+    buyer_grpc_port: 51051
+    seller_grpc_port: 51053
+    udp_port: 60000
+  - id: 1
+    host: 127.0.0.1
+    buyer_grpc_port: 51151
+    seller_grpc_port: 51153
+    udp_port: 60001
+  - id: 2
+    host: 127.0.0.1
+    buyer_grpc_port: 51251
+    seller_grpc_port: 51253
+    udp_port: 60002
+  - id: 3
+    host: 127.0.0.1
+    buyer_grpc_port: 51351
+    seller_grpc_port: 51353
+    udp_port: 60003
+  - id: 4
+    host: 127.0.0.1
+    buyer_grpc_port: 51451
+    seller_grpc_port: 51453
+    udp_port: 60004
+
+product_replicas:
+  - id: 0
+    host: 127.0.0.1
+    grpc_port: 52052
+    raft_port: 60100
+  - id: 1
+    host: 127.0.0.1
+    grpc_port: 52152
+    raft_port: 60101
+  - id: 2
+    host: 127.0.0.1
+    grpc_port: 52252
+    raft_port: 60102
+  - id: 3
+    host: 127.0.0.1
+    grpc_port: 52352
+    raft_port: 60103
+  - id: 4
+    host: 127.0.0.1
+    grpc_port: 52452
+    raft_port: 60104
+
+buyer_frontend_replicas:
+  - host: 127.0.0.1
+    port: 58090
+  - host: 127.0.0.1
+    port: 58091
+  - host: 127.0.0.1
+    port: 58092
+  - host: 127.0.0.1
+    port: 58093
+
+seller_frontend_replicas:
+  - host: 127.0.0.1
+    port: 58080
+  - host: 127.0.0.1
+    port: 58081
+  - host: 127.0.0.1
+    port: 58082
+  - host: 127.0.0.1
+    port: 58083
+
+soap:
+  host: 127.0.0.1
+  port: 8000

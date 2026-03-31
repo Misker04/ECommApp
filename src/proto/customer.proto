@@ -32,6 +32,9 @@ service CustomerService {
   rpc GetSellerRating (SessionSellerRequest)
       returns (RatingResponse);
 
+  rpc RecordSellerFeedback (RecordSellerFeedbackRequest)
+      returns (Empty);
+
   // -------- Purchases --------
 
   rpc GetBuyerPurchases (SessionRequest)
@@ -42,6 +45,9 @@ service CustomerService {
   // so buyer purchase history is recorded in Customer DB
 
   rpc RecordPurchase (RecordPurchaseRequest)
+      returns (Empty);
+
+  rpc Barrier (BarrierRequest)
       returns (Empty);
 }
 
@@ -97,6 +103,11 @@ message RatingResponse {
   int32 thumbs_down = 2;
 }
 
+message RecordSellerFeedbackRequest {
+  int32 seller_id = 1;
+  bool positive = 2;
+}
+
 // -------------------------------------------------
 // Purchases
 // -------------------------------------------------
@@ -109,6 +120,10 @@ message RecordPurchaseRequest {
   string session_token = 1;
   repeated string item_ids = 2;  // "category:number" strings
   int32 total_units = 3;
+}
+
+message BarrierRequest {
+  string nonce = 1;
 }
 
 // -------------------------------------------------

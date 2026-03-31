@@ -1,0 +1,10 @@
+.venv310/
+logs/
+eval/
+pa3custprobe_*/
+pa3realprobe_*/
+pa3_diag_logs/
+pa3_full_smoke_logs/
+__pycache__/
+*.py[cod]
+

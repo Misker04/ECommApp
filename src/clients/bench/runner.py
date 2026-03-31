@@ -10,8 +10,8 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-from src.common.config import load_config
 from src.clients.client_base import MarketplaceClient
+from src.clients.runtime_config import frontend_base_urls
 
 RUN_TAG = secrets.token_hex(3)
 
@@ -503,10 +503,8 @@ def main() -> None:
     else:
         n_sellers, n_buyers = 100, 100
 
-    cfg = load_config(args.config)
-
-    buyer_base_url = f"http://{cfg.frontend_buyer.host}:{cfg.frontend_buyer.port}"
-    seller_base_url = f"http://{cfg.frontend_seller.host}:{cfg.frontend_seller.port}"
+    buyer_base_url = frontend_base_urls(args.config, "buyer")
+    seller_base_url = frontend_base_urls(args.config, "seller")
 
     # Warmup runs (not counted in results)
     for w in range(args.warmup):
@@ -546,7 +544,7 @@ def main() -> None:
     avg_of_avgs = statistics.fmean(run_avgs) if run_avgs else 0.0
     avg_throughput = statistics.fmean(run_throughputs) if run_throughputs else 0.0
 
-    print("\n=== A2 Report Numbers ===")
+    print("\n=== PA3 Report Numbers ===")
     print(f"scenario={args.scenario} sellers={n_sellers} buyers={n_buyers}")
     print(f"average_response_time_over_{args.runs}_runs={avg_of_avgs:.6f}s")
     print(f"average_throughput_over_{args.runs}_runs={avg_throughput:.2f} ops/s")
