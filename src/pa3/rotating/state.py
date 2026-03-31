@@ -37,7 +37,12 @@ class RotationState:
     # Highest contiguous global sequence number this replica has delivered.
     delivered_contig: int = -1
 
+    # Highest contiguous global sequence number for which this replica has both
+    # the SEQUENCE message and the referenced REQUEST locally available.
+    request_present_contig: int = -1
+
     peer_sequence_contig: Dict[int, int] = field(default_factory=dict)
+    peer_receipt_contig: Dict[int, int] = field(default_factory=dict)
 
     # For assignment condition (3): per-origin contiguous local requests already assigned.
     assigned_local_contig: Dict[int, int] = field(default_factory=dict)
@@ -47,6 +52,11 @@ class RotationState:
 
     def request_key(self, origin_id: int, local_seq: int) -> str:
         return f"{origin_id}:{local_seq}"
+
+    @staticmethod
+    def parse_request_key(request_id: str) -> tuple[int, int]:
+        origin_str, local_str = request_id.split(":", 1)
+        return int(origin_str), int(local_str)
 
     def update_local_request_vector(self, origin_id: int) -> None:
         key = str(origin_id)
@@ -58,6 +68,7 @@ class RotationState:
     def update_peer_vector(self, peer_id: int, vector: Dict[str, int], sequence_contig: int) -> None:
         self.peer_request_vectors[peer_id] = {str(k): int(v) for k, v in dict(vector).items()}
         self.peer_sequence_contig[peer_id] = int(sequence_contig)
+        self.advance_peer_receipt_contig(peer_id)
 
     def current_sequencer_for(self, global_seq: int) -> int:
         return global_seq % self.cluster_size
@@ -70,6 +81,9 @@ class RotationState:
         self.sequence_by_global[global_seq] = req.request_id
         self.sequence_by_request[req.request_id] = global_seq
         self.refresh_assignment_progress()
+        self.refresh_request_presence_progress()
+        for peer_id in self.peer_request_vectors:
+            self.advance_peer_receipt_contig(peer_id)
 
     def update_received_sequence_contig(self) -> None:
         while (self.received_sequence_contig + 1) in self.sequence_by_global:
@@ -77,62 +91,53 @@ class RotationState:
 
     def refresh_assignment_progress(self) -> None:
         self.update_received_sequence_contig()
+        while True:
+            request_id = self.sequence_by_global.get(self.next_global_seq_to_assign)
+            if request_id is None:
+                return
+            origin_id, local_seq = self.parse_request_key(request_id)
+            current = self.assigned_local_contig.get(origin_id, -1)
+            if local_seq != current + 1:
+                return
+            self.assigned_local_contig[origin_id] = local_seq
+            self.next_global_seq_to_assign += 1
 
-        assigned_local_contig: Dict[int, int] = {}
-        next_global_seq_to_assign = 0
+    def refresh_request_presence_progress(self) -> None:
+        while True:
+            next_seq = self.request_present_contig + 1
+            request_id = self.sequence_by_global.get(next_seq)
+            if request_id is None or request_id not in self.request_log:
+                return
+            self.request_present_contig = next_seq
 
-        while next_global_seq_to_assign in self.sequence_by_global:
-            request_id = self.sequence_by_global[next_global_seq_to_assign]
-            origin_str, local_str = request_id.split(":", 1)
-            origin_id = int(origin_str)
-            local_seq = int(local_str)
-            current = assigned_local_contig.get(origin_id, -1)
-            if local_seq == current + 1:
-                assigned_local_contig[origin_id] = local_seq
-            next_global_seq_to_assign += 1
+    def advance_peer_receipt_contig(self, peer_id: int) -> None:
+        peer_seq_contig = self.peer_sequence_contig.get(peer_id, -1)
+        peer_vec = self.peer_request_vectors.get(peer_id, {})
+        current = self.peer_receipt_contig.get(peer_id, -1)
 
-        self.assigned_local_contig = assigned_local_contig
-        self.next_global_seq_to_assign = next_global_seq_to_assign
+        while current + 1 <= peer_seq_contig:
+            request_id = self.sequence_by_global.get(current + 1)
+            if request_id is None:
+                break
+            origin_id, local_seq = self.parse_request_key(request_id)
+            if int(peer_vec.get(str(origin_id), -1)) < local_seq:
+                break
+            current += 1
+
+        self.peer_receipt_contig[peer_id] = current
 
     def have_all_prior_assigned_requests_present(self, global_seq: int) -> bool:
-        for seq in range(global_seq):
-            request_id = self.sequence_by_global.get(seq)
-            if request_id is None or request_id not in self.request_log:
-                return False
-        return True
+        return self.request_present_contig >= (global_seq - 1)
 
     def have_quorum_receipt(self, global_seq: int) -> bool:
-        # Local replica must itself have all sequence+request info through global_seq.
-        for seq in range(global_seq + 1):
-            request_id = self.sequence_by_global.get(seq)
-            if request_id is None or request_id not in self.request_log:
-                return False
+        if self.request_present_contig < global_seq:
+            return False
 
         quorum = self.cluster_size // 2 + 1
         count = 1  # self
 
-        for peer_id, seq_contig in self.peer_sequence_contig.items():
-            if seq_contig < global_seq:
-                continue
-
-            peer_vec = self.peer_request_vectors.get(peer_id, {})
-            ok = True
-
-            for seq in range(global_seq + 1):
-                request_id = self.sequence_by_global.get(seq)
-                if request_id is None:
-                    ok = False
-                    break
-
-                origin_str, local_str = request_id.split(":", 1)
-                origin_id = int(origin_str)
-                local_seq = int(local_str)
-
-                if int(peer_vec.get(str(origin_id), -1)) < local_seq:
-                    ok = False
-                    break
-
-            if ok:
+        for peer_contig in self.peer_receipt_contig.values():
+            if peer_contig >= global_seq:
                 count += 1
 
         return count >= quorum

@@ -333,6 +333,48 @@ PYTHON=.venv/bin/python ./scripts/run_pa3_vm.sh 3 config/pa3_4vm_example.yaml fr
 PYTHON=.venv/bin/python ./scripts/run_pa3_vm.sh 4 config/pa3_4vm_example.yaml frontends
 ```
 
+Linux single-command restart on each VM:
+
+Start this on all four VMs around the same time. Each VM script starts only its local services, then waits for global customer/product readiness before continuing.
+
+```bash
+chmod +x scripts/restart_pa3_vm.sh
+```
+
+VM1:
+
+```bash
+source .venv/bin/activate
+PYTHON=.venv/bin/python bash scripts/restart_pa3_vm.sh 1 config/pa3_4vm.yaml
+```
+
+VM2:
+
+```bash
+source .venv/bin/activate
+PYTHON=.venv/bin/python bash scripts/restart_pa3_vm.sh 2 config/pa3_4vm.yaml
+```
+
+VM3:
+
+```bash
+source .venv/bin/activate
+PYTHON=.venv/bin/python bash scripts/restart_pa3_vm.sh 3 config/pa3_4vm.yaml
+```
+
+VM4:
+
+```bash
+source .venv/bin/activate
+PYTHON=.venv/bin/python bash scripts/restart_pa3_vm.sh 4 config/pa3_4vm.yaml
+```
+
+Optional environment variables:
+
+- `STOP_FIRST=0` to skip the local `pkill` step
+- `CUSTOMER_TIMEOUT=180` to wait longer for the customer barrier
+- `PRODUCT_TIMEOUT=180` to wait longer for the product barrier
+
 Then run the CLIs or benchmark from any machine that can reach all four frontend replicas:
 
 ```bash

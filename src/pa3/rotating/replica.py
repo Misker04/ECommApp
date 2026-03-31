@@ -216,6 +216,9 @@ class RotatingSequencerReplica:
         self.state.request_log[req.request_id] = req
         self.state.request_by_sender_local[(req.origin_id, req.local_seq)] = req.request_id
         self.state.update_local_request_vector(req.origin_id)
+        self.state.refresh_request_presence_progress()
+        for peer_id in self.state.peer_request_vectors:
+            self.state.advance_peer_receipt_contig(peer_id)
         self.state.retransmit_requested_requests.discard(req.request_id)
 
     def _store_sequence(self, global_seq: int, request_id: str) -> None:
@@ -226,6 +229,9 @@ class RotatingSequencerReplica:
         self.state.sequence_by_global[global_seq] = request_id
         self.state.sequence_by_request[request_id] = global_seq
         self.state.refresh_assignment_progress()
+        self.state.refresh_request_presence_progress()
+        for peer_id in self.state.peer_request_vectors:
+            self.state.advance_peer_receipt_contig(peer_id)
         self.state.retransmit_requested_sequences.discard(global_seq)
 
     async def submit(self, op: dict) -> dict:
