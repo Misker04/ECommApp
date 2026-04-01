@@ -2,7 +2,7 @@
 
 This project is the PA3 version of our PA2 marketplace. The external APIs stay the same as PA2: client to frontend uses REST, frontend to backend uses gRPC, and payment uses SOAP/WSDL. The main PA3 change is that the server side is now replicated so the system is not dependent on only one frontend or one backend process.
 
-## Brief System Design and Assumptions
+## System Design and Assumptions
 
 - The buyer and seller frontends are each replicated on 4 REST servers, and clients keep a list of replicas and retry another one if the current replica fails.
 - The customer database is replicated on 5 servers using a rotating sequencer atomic broadcast protocol built on UDP.
@@ -23,17 +23,14 @@ What works:
 - Product DB replication is implemented with Raft-based leader election and replication.
 - The PA2 request flow still works with REST, gRPC, and SOAP.
 - The benchmark runner supports scenarios `1`, `2`, and `3`, and also supports the PA3 failure modes.
-- The current test suite passes locally: `6 passed`.
 
 What is not fully complete / simplified:
 
 - Backend state is still in memory, so restarting a backend replica resets that replica's local state.
-- Performance numbers are not stored automatically in the README; they should be reported separately in the performance report file as required by the assignment.
-- The exact cloud measurements depend on the VM deployment and must be collected after running the full setup on the assigned machines.
 
 ## Deployment Setup
 
-This project is configured to run on at least 4 VMs, as required by the assignment. In our setup, replicas of the same component are spread across different machines, and every replica runs as its own process.
+This project is configured to run on 4 VMs. In our setup, replicas of the same component are spread across different machines, and every replica runs as its own process.
 
 | VM | Services |
 |---|---|
