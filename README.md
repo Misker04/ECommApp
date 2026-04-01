@@ -1,226 +1,159 @@
 # PA3 - Replicated Online Marketplace
 
-This project extends the PA2 marketplace to keep the same external APIs and transport choices while removing the main single-server bottlenecks. Client to frontend traffic is still REST, frontend to backend traffic is still gRPC, and payment authorization is still SOAP/WSDL. The buyer and seller frontends are replicated over four REST servers each. The customer database is replicated over five servers using a rotating sequencer atomic broadcast layer built on UDP. The product database is replicated over five servers using a small in-repo Raft layer that handles leader election, heartbeats, log replication, and commit/apply. The local config runs all replicas on one machine with different ports, but every replica is still a separate process and talks over the network stack. For a four-VM deployment, the main change is replacing the `127.0.0.1` entries in `config/local.yaml` with the VM IP addresses for the matching replicas while keeping the same replica lists and role separation.
+This project is the PA3 version of our PA2 marketplace. The external APIs stay the same as PA2: client to frontend uses REST, frontend to backend uses gRPC, and payment uses SOAP/WSDL. The main PA3 change is that the server side is now replicated so the system is not dependent on only one frontend or one backend process.
 
-## Current state
+## Brief System Design and Assumptions
+
+- The buyer and seller frontends are each replicated on 4 REST servers, and clients keep a list of replicas and retry another one if the current replica fails.
+- The customer database is replicated on 5 servers using a rotating sequencer atomic broadcast protocol built on UDP.
+- Every customer update is first broadcast as a `Request`, then ordered by the rotating sequencer through a `Sequence` message, and missing messages are recovered with `Retransmit` requests.
+- Request IDs follow the format `<sender_id, local_seq_num>` and global sequence numbers start from `0`.
+- The product database is replicated on 5 servers using Raft with leader election, log replication, heartbeats, and majority commit.
+- Only the current product leader handles client-facing writes, and followers redirect or force retry through another replica.
+- The buyer and seller frontends are stateless, so no replication protocol is needed for them beyond client-side failover.
+- All replicas run as separate processes and communicate through the network stack, even when multiple replicas are placed on the same VM.
+- We assume unreliable communication for customer/product replication, crash failures for product replicas, and restart failed frontend replicas on the same IP/port.
+
+## Current State
 
 What works:
-- Buyer and seller REST clients can use a list of frontend replicas and fail over to another replica when one is unavailable.
-- Buyer and seller REST frontends now use lists of backend replicas instead of a single hard-coded backend target.
-- Customer DB mutations go through a UDP rotating sequencer broadcast layer before they are applied locally.
-- Product DB replicas run behind a lightweight Raft layer and only the leader serves gRPC requests.
-- Existing PA2 buyer/seller logic, gRPC services, SOAP payment path, and benchmark runner are still used.
 
-What is still simplified:
-- The Raft implementation is intentionally lightweight and embedded in this repo instead of using a downloaded third-party package.
-- The storage model is still in-memory, so restarting a backend replica clears that replica's local state.
-- The performance report file is not auto-generated here; the benchmark runner prints the numbers you need to record.
+- Buyer and seller frontend replication is working with client-side failover across replica lists.
+- Customer DB replication is implemented with the rotating sequencer atomic broadcast layer over UDP.
+- Product DB replication is implemented with Raft-based leader election and replication.
+- The PA2 request flow still works with REST, gRPC, and SOAP.
+- The benchmark runner supports scenarios `1`, `2`, and `3`, and also supports the PA3 failure modes.
+- The current test suite passes locally: `6 passed`.
 
-## PA3 design summary
+What is not fully complete / simplified:
 
-### 1. Rotating sequencer atomic broadcast for Customer DB
-- Every customer mutation is first sent as a UDP `Request` message to all customer replicas.
-- Request IDs use the assignment format `<sender_id, local_seq_num>`.
-- Global sequence number `k` is assigned by replica `k mod n`.
-- The sequencer only chooses requests whose earlier requests from the same sender were already assigned.
-- Replicas deliver requests strictly in global order.
-- Each message carries metadata about the highest contiguous request seen per sender and the highest sequence seen so replicas can detect gaps.
-- Missing `Request` or `Sequence` traffic is recovered with UDP `Retransmit` messages.
+- Backend state is still in memory, so restarting a backend replica resets that replica's local state.
+- Performance numbers are not stored automatically in the README; they should be reported separately in the performance report file as required by the assignment.
+- The exact cloud measurements depend on the VM deployment and must be collected after running the full setup on the assigned machines.
 
-### 2. Product DB replication with Raft
-- Product DB replicas keep a replicated log.
-- Followers reject client-facing gRPC work and the frontend retries another replica until it reaches the leader.
-- The leader appends product/cart/feedback/purchase mutations to the log, replicates them to followers, and applies them after a majority commit.
-- Leader election and heartbeats are handled over UDP between product replicas.
+## Deployment Setup
 
-### 3. Frontend replication
-- Buyer frontend has four replicas.
-- Seller frontend has four replicas.
-- The client base class now accepts a list of frontend URLs and retries another replica on connection failure.
+This project is configured to run on at least 4 VMs, as required by the assignment. In our setup, replicas of the same component are spread across different machines, and every replica runs as its own process.
 
-## Core Files
-- `src/replication/rotating_sequencer.py`: UDP rotating sequencer atomic broadcast for customer replicas.
-- `src/replication/simple_raft.py`: lightweight Raft implementation for product replicas.
-- `src/backend/customer_grpc_server.py`: customer replication integration.
-- `src/backend/product_grpc_server.py`: product replication integration and leader-only request handling.
-- `src/frontend/buyer_rest_server.py`: buyer frontend backend-failover logic.
-- `src/frontend/seller_rest_server.py`: seller frontend backend-failover logic.
-- `src/clients/client_base.py`: frontend replica failover from the client side.
-- `config/local.yaml`: single-machine replica layout you can later map to VM IPs.
+| VM | Services |
+|---|---|
+| VM1 | Seller frontend replica 0, Buyer frontend replica 0, Customer DB replica 0, Product DB replica 0 |
+| VM2 | Seller frontend replica 1, Buyer frontend replica 1, Customer DB replica 1, Product DB replica 1 |
+| VM3 | Seller frontend replica 2, Buyer frontend replica 2, Customer DB replica 2, Product DB replica 2 |
+| VM4 | Seller frontend replica 3, Buyer frontend replica 3, Customer DB replicas 3 and 4, Product DB replicas 3 and 4, SOAP server |
 
-## Local single-machine deployment
+The active replica addresses and ports are already listed in `config/local.yaml`. If the deployment changes, update the host entries there before running the system.
+
+## Requirements
+
+- Python 3.10 or 3.11 
+- Virtual environment
+- Dependencies from `requirements.txt`
+- At least 4 VMs for cloud deployment
+
+## Setup
+
+Create and activate a virtual environment:
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+```
 
 Install dependencies:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Start the five customer replicas:
+Generate protobuf files:
 
 ```bash
-python -m src.backend.customer_grpc_server --config config/local.yaml --replica-id 0
-python -m src.backend.customer_grpc_server --config config/local.yaml --replica-id 1
-python -m src.backend.customer_grpc_server --config config/local.yaml --replica-id 2
-python -m src.backend.customer_grpc_server --config config/local.yaml --replica-id 3
-python -m src.backend.customer_grpc_server --config config/local.yaml --replica-id 4
+bash generate_proto.sh
 ```
 
-Start the five product replicas:
+## Run Order
 
-```bash
-python -m src.backend.product_grpc_server --config config/local.yaml --replica-id 0
-python -m src.backend.product_grpc_server --config config/local.yaml --replica-id 1
-python -m src.backend.product_grpc_server --config config/local.yaml --replica-id 2
-python -m src.backend.product_grpc_server --config config/local.yaml --replica-id 3
-python -m src.backend.product_grpc_server --config config/local.yaml --replica-id 4
-```
+Start the services in this order:
 
-Start the four seller frontend replicas:
+1. SOAP server
+2. All 5 customer DB replicas
+3. All 5 product DB replicas
+4. All 4 seller frontend replicas
+5. All 4 buyer frontend replicas
+6. Buyer/seller clients or benchmark runner
 
-```bash
-python run_seller_server.py --config config/local.yaml --replica-id 0
-python run_seller_server.py --config config/local.yaml --replica-id 1
-python run_seller_server.py --config config/local.yaml --replica-id 2
-python run_seller_server.py --config config/local.yaml --replica-id 3
-```
-
-Start the four buyer frontend replicas:
-
-```bash
-python run_buyer_server.py --config config/local.yaml --replica-id 0
-python run_buyer_server.py --config config/local.yaml --replica-id 1
-python run_buyer_server.py --config config/local.yaml --replica-id 2
-python run_buyer_server.py --config config/local.yaml --replica-id 3
-```
+## Commands
 
 Start SOAP:
 
 ```bash
-python -m src.financial.soap_server --config config/local.yaml
+python3 -m src.financial.soap_server --config config/local.yaml
+```
+
+Start customer DB replicas:
+
+```bash
+python3 -m src.backend.customer_grpc_server --config config/local.yaml --replica-id 0
+python3 -m src.backend.customer_grpc_server --config config/local.yaml --replica-id 1
+python3 -m src.backend.customer_grpc_server --config config/local.yaml --replica-id 2
+python3 -m src.backend.customer_grpc_server --config config/local.yaml --replica-id 3
+python3 -m src.backend.customer_grpc_server --config config/local.yaml --replica-id 4
+```
+
+Start product DB replicas:
+
+```bash
+python3 -m src.backend.product_grpc_server --config config/local.yaml --replica-id 0
+python3 -m src.backend.product_grpc_server --config config/local.yaml --replica-id 1
+python3 -m src.backend.product_grpc_server --config config/local.yaml --replica-id 2
+python3 -m src.backend.product_grpc_server --config config/local.yaml --replica-id 3
+python3 -m src.backend.product_grpc_server --config config/local.yaml --replica-id 4
+```
+
+Start seller frontend replicas:
+
+```bash
+python3 run_seller_server.py --config config/local.yaml --replica-id 0
+python3 run_seller_server.py --config config/local.yaml --replica-id 1
+python3 run_seller_server.py --config config/local.yaml --replica-id 2
+python3 run_seller_server.py --config config/local.yaml --replica-id 3
+```
+
+Start buyer frontend replicas:
+
+```bash
+python3 run_buyer_server.py --config config/local.yaml --replica-id 0
+python3 run_buyer_server.py --config config/local.yaml --replica-id 1
+python3 run_buyer_server.py --config config/local.yaml --replica-id 2
+python3 run_buyer_server.py --config config/local.yaml --replica-id 3
 ```
 
 Run clients:
 
 ```bash
-python -m src.clients.seller_cli --config config/local.yaml
-python -m src.clients.buyer_cli --config config/local.yaml
+python3 -m src.clients.seller_cli --config config/local.yaml
+python3 -m src.clients.buyer_cli --config config/local.yaml
 ```
 
-Run benchmarks:
+## Benchmark / Evaluation
+
+Run the benchmark scenarios:
 
 ```bash
-python -m src.clients.bench.runner --config config/local.yaml --scenario 1
-python -m src.clients.bench.runner --config config/local.yaml --scenario 2
-python -m src.clients.bench.runner --config config/local.yaml --scenario 3
+python3 -m src.clients.bench.runner --config config/local.yaml --scenario 1
+python3 -m src.clients.bench.runner --config config/local.yaml --scenario 2
+python3 -m src.clients.bench.runner --config config/local.yaml --scenario 3
 ```
 
 Run the PA3 failure cases:
 
 ```bash
-python3 scripts/pa3_local_cluster.py --config config/local.yaml start
-
-python -m src.clients.bench.runner --config config/local.yaml --scenario 1 --failure-mode normal
-python -m src.clients.bench.runner --config config/local.yaml --scenario 1 --failure-mode frontend_fail
-python -m src.clients.bench.runner --config config/local.yaml --scenario 1 --failure-mode product_follower_fail
-python -m src.clients.bench.runner --config config/local.yaml --scenario 1 --failure-mode product_leader_fail
-
-python -m src.clients.bench.runner --config config/local.yaml --scenario 2 --failure-mode normal
-python -m src.clients.bench.runner --config config/local.yaml --scenario 2 --failure-mode frontend_fail
-python -m src.clients.bench.runner --config config/local.yaml --scenario 2 --failure-mode product_follower_fail
-python -m src.clients.bench.runner --config config/local.yaml --scenario 2 --failure-mode product_leader_fail
-
-python -m src.clients.bench.runner --config config/local.yaml --scenario 3 --failure-mode normal
-python -m src.clients.bench.runner --config config/local.yaml --scenario 3 --failure-mode frontend_fail
-python -m src.clients.bench.runner --config config/local.yaml --scenario 3 --failure-mode product_follower_fail
-python -m src.clients.bench.runner --config config/local.yaml --scenario 3 --failure-mode product_leader_fail
-
-python3 scripts/pa3_local_cluster.py --config config/local.yaml stop
+python3 -m src.clients.bench.runner --config config/local.yaml --scenario 1 --failure-mode normal
+python3 -m src.clients.bench.runner --config config/local.yaml --scenario 1 --failure-mode frontend_fail
+python3 -m src.clients.bench.runner --config config/local.yaml --scenario 1 --failure-mode product_follower_fail
+python3 -m src.clients.bench.runner --config config/local.yaml --scenario 1 --failure-mode product_leader_fail
 ```
 
-## Moving from one machine to four VMs
+Repeat the same for scenarios `2` and `3`.
 
-- Keep the same replica counts.
-- Replace the `host` values in `config/local.yaml` with the correct VM IPs.
-- Spread replicas of the same component across different VMs instead of leaving them all on `127.0.0.1`.
-- Keep each replica as a separate process even if two replicas share a VM.
-- If a frontend replica crashes, restart that replica on the same IP and port.
-- If a customer or product replica moves to another machine, update the matching replica entry in the config file on every process that talks to it.
-
-## 4-VM layout
-
-Keep `config/local.yaml` as localhost for local development. When you move to the college VMs, the comments in that file show the intended target VM for each replica. A simple layout is:
-
-- VM1:
-  - seller frontend replica 0
-  - buyer frontend replica 0
-  - customer DB replica 0
-  - product DB replica 0
-- VM2:
-  - seller frontend replica 1
-  - buyer frontend replica 1
-  - customer DB replica 1
-  - product DB replica 1
-- VM3:
-  - seller frontend replica 2
-  - buyer frontend replica 2
-  - customer DB replica 2
-  - product DB replica 2
-- VM4:
-  - seller frontend replica 3
-  - buyer frontend replica 3
-  - customer DB replicas 3 and 4
-  - product DB replicas 3 and 4
-  - SOAP server
-
-## Per-VM run steps
-
-On VM1 run:
-
-```bash
-python -m src.backend.customer_grpc_server --config config/local.yaml --replica-id 0
-python -m src.backend.product_grpc_server --config config/local.yaml --replica-id 0
-python run_seller_server.py --config config/local.yaml --replica-id 0
-python run_buyer_server.py --config config/local.yaml --replica-id 0
-```
-
-On VM2 run:
-
-```bash
-python -m src.backend.customer_grpc_server --config config/local.yaml --replica-id 1
-python -m src.backend.product_grpc_server --config config/local.yaml --replica-id 1
-python run_seller_server.py --config config/local.yaml --replica-id 1
-python run_buyer_server.py --config config/local.yaml --replica-id 1
-```
-
-On VM3 run:
-
-```bash
-python -m src.backend.customer_grpc_server --config config/local.yaml --replica-id 2
-python -m src.backend.product_grpc_server --config config/local.yaml --replica-id 2
-python run_seller_server.py --config config/local.yaml --replica-id 2
-python run_buyer_server.py --config config/local.yaml --replica-id 2
-```
-
-On VM4 run:
-
-```bash
-python -m src.financial.soap_server --config config/local.yaml
-python -m src.backend.customer_grpc_server --config config/local.yaml --replica-id 3
-python -m src.backend.customer_grpc_server --config config/local.yaml --replica-id 4
-python -m src.backend.product_grpc_server --config config/local.yaml --replica-id 3
-python -m src.backend.product_grpc_server --config config/local.yaml --replica-id 4
-python run_seller_server.py --config config/local.yaml --replica-id 3
-python run_buyer_server.py --config config/local.yaml --replica-id 3
-```
-
-Before using the VMs for real, replace only the `host` values in `config/local.yaml` with the VM IP addresses. The ports and replica ids can stay the same.
-
-## Evaluation notes
-
-- Average response time is measured per API over ten runs.
-- Average throughput is measured over ten runs with each client issuing 1000 API calls per run.
-- For PA3 you should capture results for normal execution, frontend replica failure, product follower failure, and product leader failure.
-- Use the benchmark runner output as the source for the numbers you place in the performance report.
