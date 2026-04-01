@@ -38,8 +38,7 @@ What is still simplified:
 - Seller frontend has four replicas.
 - The client base class now accepts a list of frontend URLs and retries another replica on connection failure.
 
-## Files you will care about most
-
+## Core Files
 - `src/replication/rotating_sequencer.py`: UDP rotating sequencer atomic broadcast for customer replicas.
 - `src/replication/simple_raft.py`: lightweight Raft implementation for product replicas.
 - `src/backend/customer_grpc_server.py`: customer replication integration.
@@ -150,7 +149,7 @@ python3 scripts/pa3_local_cluster.py --config config/local.yaml stop
 - If a frontend replica crashes, restart that replica on the same IP and port.
 - If a customer or product replica moves to another machine, update the matching replica entry in the config file on every process that talks to it.
 
-## Suggested 4-VM layout
+## 4-VM layout
 
 Keep `config/local.yaml` as localhost for local development. When you move to the college VMs, the comments in that file show the intended target VM for each replica. A simple layout is:
 
